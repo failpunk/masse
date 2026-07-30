@@ -69,6 +69,19 @@ unreadable as 40px type on near-black. Both are the same hue.
 
 No shadows. A raised surface is expressed with a rule, not a blur.
 
+## Figure emphasis
+
+| Token | Value |
+|---|---|
+| `--figure-rule` | `1px solid #3b424b` |
+| `--figure-halo` | `rgba(43,91,255,.14)` |
+| `--figure-inset` | `var(--s5)` |
+
+The one figure carries the page, so it gets more presence than anything else: a brighter
+rule than the section dividers, and a contained blue halo bled behind it. The halo is the
+same hue as the accent and is the only place the page uses light to lift something, which
+is why it stays an exception to the no-shadows rule rather than a new pattern.
+
 ## Ground texture
 
 | Token | Value |

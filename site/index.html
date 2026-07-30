@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Masse</title>
-<meta name="description" content="Every Inbox, Calendar, Drive in a single app. 1.2 MB, for macOS." />
+<meta name="description" content="Every Google Inbox, Calendar, and Drive in a single app. A simple dedicated app for managing your plethora of Google accounts." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;900&family=Space+Grotesk:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -20,6 +20,7 @@
     --rule:1px solid #2a2f36; --rule-soft:1px solid #1c2027;
     --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
     --grid:rgba(241,242,244,.075); --grid-step:48px; --glow:rgba(43,91,255,.12);
+    --figure-rule:1px solid #3b424b; --figure-halo:rgba(43,91,255,.14); --figure-inset:var(--s5);
   }
   *,*::before,*::after{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -68,15 +69,25 @@
 
   /* The one figure: a replica of the app's own chrome */
   figure{margin:0; border-top:var(--rule); padding:var(--s8) 0}
-  .app{border:var(--rule); background:var(--surface); display:flex; height:340px; overflow:hidden;
+  /* The figure carries the page, so it gets a halo and a brighter rule than anything
+     else. The only place light lifts a surface. */
+  .app-halo{position:relative; padding:var(--figure-inset)}
+  .app-halo::before{
+    content:''; position:absolute; inset:0;
+    background:radial-gradient(60% 70% at 50% 40%, var(--figure-halo), transparent 70%);
+    pointer-events:none;
+  }
+  .app{border:var(--figure-rule); background:var(--surface); display:flex; height:400px; overflow:hidden;
         position:relative; z-index:1}
   .rail{
     width:64px; flex:none; background:#0e1014; border-right:var(--rule-soft); display:flex; flex-direction:column;
     align-items:center; gap:14px; padding:var(--s3) 0;
   }
   .face{width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
-        font-family:var(--font-display); font-weight:900; font-size:13px; color:#fff}
-  .face.on{box-shadow:0 0 0 2px var(--ink)}
+        font-family:var(--font-display); font-weight:900; font-size:13px; color:#fff;
+        opacity:.45; filter:saturate(.65)}
+  /* Mirrors the app's selected state, so the figure is not lying about the product. */
+  .face.on{opacity:1; filter:none; box-shadow:0 0 0 3px #0e1014, 0 0 0 5px var(--ink)}
   .app-main{flex:1; min-width:0; display:flex; flex-direction:column}
   .tabs{height:44px; flex:none; background:#0e1014; border-bottom:var(--rule-soft); display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
   .tab{font-size:12px; color:#8d939c; padding:6px 12px; font-family:var(--font-body)}
@@ -86,15 +97,29 @@
   .line.dark{background:#c9ccd1}
   figcaption{margin-top:var(--s4); display:flex; gap:var(--s6); flex-wrap:wrap}
 
-  /* Facts: a rules-separated list, deliberately uneven, no cards */
-  .facts{border-top:var(--rule)}
-  .fact{display:grid; grid-template-columns:minmax(0,7ch) minmax(0,1fr); gap:var(--s6);
-        padding:var(--s6) 0; border-bottom:var(--rule-soft); align-items:start}
-  .fact:last-child{border-bottom:0}
-  .fact p{margin:0; max-width:52ch}
-  .fact .n{font-family:var(--font-mono); font-size:40px; line-height:1; letter-spacing:-.02em}
-  .fact .n.accent{color:var(--accent-lift)}
-  .fact .unit{font-size:14px}
+  /* Three plain points. No figures, no cards. */
+  .facts{border-top:var(--rule); padding:var(--s8) 0}
+  .points{list-style:none; margin:0; padding:0; display:grid; gap:var(--s5); max-width:46ch}
+  .points li{
+    font-size:clamp(19px,2.4vw,26px); line-height:1.35; letter-spacing:-.01em;
+    padding-left:var(--s6); position:relative;
+  }
+  .points li::before{
+    content:''; position:absolute; left:0; top:.62em;
+    width:12px; height:1px; background:var(--accent-lift);
+  }
+
+  /* Testimonials. Quiet, so the joke lands without a card around it. */
+  .says{border-top:var(--rule); padding:var(--s8) 0; display:grid}
+  .says .wrap{display:grid; gap:var(--s7); grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .says blockquote{margin:0}
+  .says p{margin:0; font-size:17px; line-height:1.45}
+  .says cite{
+    display:block; margin-top:var(--s3); font-style:normal;
+    font-family:var(--font-mono); font-size:10px; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--ink-soft);
+  }
+  .says cite::before{content:'/ '}
 
   /* Install */
   .install{border-top:var(--rule); padding:var(--s8) 0}
@@ -126,8 +151,8 @@
 <main>
   <section class="hero">
     <div class="wrap">
-      <h1>Every Inbox, Calendar, Drive in a single app.</h1>
-      <p class="lead">No logging in and out. No wondering which account you are in.</p>
+      <h1>Every Google Inbox, Calendar, and Drive in a single app</h1>
+      <p class="lead">Simple dedicated app for managing your plethora of Google accounts.</p>
       <div class="cta-row">
         <a class="cta" href="Masse.zip" download>Download for macOS</a>
         <span class="micro fig">1.2 MB &nbsp;/&nbsp; macOS 11 or later &nbsp;/&nbsp; Apple silicon</span>
@@ -137,6 +162,7 @@
 
   <figure>
     <div class="wrap">
+      <div class="app-halo">
       <div class="app">
         <div class="rail">
           <span class="face on" style="background:#6366f1">JV</span>
@@ -159,6 +185,7 @@
           </div>
         </div>
       </div>
+      </div>
       <figcaption>
         <span class="micro">Accounts on the left</span>
         <span class="micro">Apps across the top</span>
@@ -169,21 +196,28 @@
 
   <section class="facts">
     <div class="wrap">
-      <div class="fact">
-        <span class="n accent">1.2<span class="unit">MB</span></span>
-        <p>It borrows the browser engine already in macOS instead of bringing its own, so the
-           whole app is smaller than a photograph.</p>
-      </div>
-      <div class="fact">
-        <span class="n">520<span class="unit">MB</span></span>
-        <p>What one open account costs. Leave an account alone and Masse closes it, and the memory
-           comes back. You set how many stay open and for how long.</p>
-      </div>
-      <div class="fact">
-        <span class="n">&#8984;2</span>
-        <p>Second account. Command and a number moves between accounts, command shift and a
-           number moves between Mail, Calendar and Drive.</p>
-      </div>
+      <ul class="points">
+        <li>All of your Google accounts live in one window.</li>
+        <li>Mail, Calendar and Drive for every one of them.</li>
+        <li>Switch with a click, or Command and a number.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="says">
+    <div class="wrap">
+      <blockquote>
+        <p>Now I can see all of the emails I've been ignoring for so long in one place</p>
+        <cite>Justin</cite>
+      </blockquote>
+      <blockquote>
+        <p>Finally, an app that allows me to properly JobMaxx</p>
+        <cite>Jarbas</cite>
+      </blockquote>
+      <blockquote>
+        <p>I don't know what this app is, my AI agent installed it for me</p>
+        <cite>Jean</cite>
+      </blockquote>
     </div>
   </section>
 
@@ -191,9 +225,9 @@
     <div class="wrap">
       <span class="micro">Setup</span>
       <ol class="steps">
-        <li><span>01</span> Move Masse to Applications.</li>
-        <li><span>02</span> Sign in to each account once, with Google's own sign in page.</li>
-        <li><span>03</span> That is the whole setup.</li>
+        <li><span>01</span> Move Masse to your Applications folder.</li>
+        <li><span>02</span> Sign in to each one of your Google accounts.</li>
+        <li><span>03</span> Wish you hadn't signed in to all your Google accounts after looking at how full your calendar is, and then regret your decision.</li>
       </ol>
     </div>
   </section>

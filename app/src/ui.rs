@@ -56,16 +56,25 @@ pub fn rail_html(state: &str) -> String {
   .ava {{
     width: 46px; height: 46px; border-radius: 50%; overflow: hidden; position: relative;
     display: grid; place-items: center; color: #fff; font: 600 15px/1 system-ui;
-    box-shadow: 0 0 0 2px transparent; transition: box-shadow .14s ease, transform .14s ease;
+    box-shadow: 0 0 0 2px transparent;
+    /* Inactive accounts are held back so the active one reads instantly. */
+    opacity: .45; filter: saturate(.65);
+    transition: box-shadow .14s ease, opacity .14s ease, filter .14s ease, transform .14s ease;
   }}
   .ava img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
-  .ava:hover {{ box-shadow: 0 0 0 2px rgba(255,255,255,.45); }}
-  .ava.on {{ box-shadow: 0 0 0 2.5px #fff; }}
+  .ava:hover {{ opacity: .8; filter: none; box-shadow: 0 0 0 2px rgba(255,255,255,.45); }}
+  .ava.on {{
+    opacity: 1; filter: none;
+    box-shadow: 0 0 0 3px #11131a, 0 0 0 5px #fff;
+    transform: scale(1.04);
+  }}
   /* A bar on the window edge marks the current account even at a glance. */
   .slot {{ position: relative; display: grid; place-items: center; width: 100%; height: 46px; }}
+  .slot {{ border-radius: 0 12px 12px 0; }}
+  .slot.on {{ background: rgba(255,255,255,.08); }}
   .slot.on::before {{
-    content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px;
-    border-radius: 0 3px 3px 0; background: #fff;
+    content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 5px;
+    border-radius: 0 4px 4px 0; background: #fff;
   }}
   .gear {{
     margin-top: auto; width: 44px; height: 44px; border-radius: 13px; flex: none;
