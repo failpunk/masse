@@ -215,7 +215,7 @@ pub fn settings_html(state: &str) -> String {
 <style>
   {SHARED_CSS}
   body {{
-    height: 100vh; display: grid; place-items: center; padding: 28px;
+    height: 100vh; display: grid; place-items: center; padding: 28px 28px 68px;
     background: rgba(8, 9, 13, .78); backdrop-filter: blur(14px);
   }}
   .card {{
@@ -267,6 +267,18 @@ pub fn settings_html(state: &str) -> String {
     color: rgba(255,255,255,.55); font-size: 12.5px;
   }}
   footer {{ display: flex; align-items: center; gap: 10px; margin-top: 20px; }}
+  /* Pinned to the bottom of the overlay, outside the card, so it reads as a line
+     across the app rather than another row of settings. */
+  .promo {{
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px 16px; background: rgba(255,255,255,.06);
+    border-top: 1px solid rgba(255,255,255,.10);
+    font-size: 12.5px; color: rgba(255,255,255,.62); cursor: pointer;
+    transition: background .12s ease, color .12s ease;
+  }}
+  .promo:hover {{ background: rgba(255,255,255,.11); color: #fff; }}
+  .promo svg {{ width: 13px; height: 13px; opacity: .8; }}
   .link {{ font-size: 11.5px; color: rgba(255,255,255,.35); text-decoration: underline; }}
   .link:hover {{ color: #fff; }}
   .done {{
@@ -274,6 +286,13 @@ pub fn settings_html(state: &str) -> String {
     background: #fff; color: #11131a; font-weight: 600; font-size: 13px;
   }}
 </style>
+<button class="promo" id="promo" title="Opens in your browser">
+  Learn more about our AI research
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"
+       stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7.5 4.5h8v8"/><path d="M15.5 4.5L5 15"/>
+  </svg>
+</button>
 <div class="card">
   <header>
     <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
@@ -366,6 +385,9 @@ pub fn settings_html(state: &str) -> String {
   document.getElementById('idle').onchange = push;
   document.getElementById('json').onclick = () => send({{ type: 'config' }});
   document.getElementById('close').onclick = () => send({{ type: 'close' }});
+  // Routed through the host so it lands in the real browser, not in a pane.
+  document.getElementById('promo').onclick = () =>
+    send({{ type: 'link', url: 'https://ae.studio/alignment' }});
   document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') send({{ type: 'close' }}); }});
   window.shim.render({state});
 </script>"##

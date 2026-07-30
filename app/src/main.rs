@@ -738,6 +738,7 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
             idle_minutes: value["idle_minutes"].as_u64().unwrap_or(15),
         },
         Some("config") => Msg::OpenConfig,
+        Some("link") => Msg::External(value["url"].as_str().unwrap_or_default().to_string()),
         _ => return,
     };
     let _ = proxy.send_event(msg);
