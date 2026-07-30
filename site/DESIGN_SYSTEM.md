@@ -24,7 +24,7 @@ Deliberately not Inter, which is the default and reads as templated.
 | `--font-display` | Archivo, 900 |
 | `--font-body` | Space Grotesk, 400 / 500 |
 | `--font-mono` | JetBrains Mono, 400 / 500, `tabular-nums` |
-| `--step-hero` | `clamp(44px, 9vw, 122px)` / line-height .88 / tracking -.035em |
+| `--step-hero` | `clamp(35px, 7.2vw, 98px)` / line-height .9 / tracking -.03em |
 | `--step-lead` | `clamp(17px, 2vw, 21px)` / line-height 1.5 |
 | `--step-body` | 16px / 1.55 |
 | `--step-figure` | 40px / 1 (mono) |
