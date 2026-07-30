@@ -284,7 +284,7 @@ pub fn settings_html(state: &str) -> String {
 
   <h2>Memory</h2>
   <div class="dial">
-    <label>Panes kept loaded
+    <label>Panes kept in memory
       <small>Fewer means less memory and a reload when you switch back.</small></label>
     <input id="maxLive" type="number" min="1" max="9">
   </div>
