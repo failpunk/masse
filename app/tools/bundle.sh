@@ -81,6 +81,12 @@ fi
 if [ -d ../site ]; then
   ditto -c -k --keepParent "$INSTALLED" ../site/Masse.zip 2>/dev/null \
     && echo "[bundle] refreshed ../site/Masse.zip"
+  # Stamp the version wherever the page states it, so the page can never claim a
+  # different build than the zip beside it. Scoped to data-version lines only.
+  if [ -f ../site/index.html ]; then
+    sed -i '' -E "/data-version/s/[0-9]+\.[0-9]+\.[0-9]+/$VERSION/" ../site/index.html \
+      && echo "[bundle] stamped v$VERSION into ../site/index.html"
+  fi
 fi
 
 echo "[bundle] built $APP (v$VERSION, $BUNDLE_ID)"

@@ -149,6 +149,10 @@
   .steps span{font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); flex:none; padding-top:3px}
 
   footer{border-top:var(--rule); padding:var(--s5) 0 var(--s7)}
+  /* Sits in the footer row, not a pill. Coloured just enough to read as a link. */
+  .flink{color:var(--accent-lift); text-decoration:none; border-bottom:1px solid transparent;
+         transition:border-color var(--dur) var(--ease), color var(--dur) var(--ease)}
+  .flink:hover{color:var(--ink); border-bottom-color:var(--ink)}
   footer .wrap{display:flex; justify-content:space-between; gap:var(--s5); flex-wrap:wrap}
 
   @media (max-width:760px){
@@ -165,7 +169,7 @@
 <header>
   <div class="wrap">
     <span class="brand">Masse</span>
-    <span class="micro fig">0.9.5 / macOS</span>
+    <span class="micro fig" data-version>0.9.9 / macOS</span>
   </div>
 </header>
 
@@ -276,8 +280,9 @@
 
 <footer>
   <div class="wrap">
+    <a class="micro flink" href="https://ae.studio/alignment" target="_blank" rel="noopener">Learn more about our AI research</a>
     <span class="micro">Links open in the browser you already use</span>
-    <span class="micro fig">Masse 0.9.5</span>
+    <span class="micro fig" data-version>Masse 0.9.9</span>
   </div>
 </footer>
 
