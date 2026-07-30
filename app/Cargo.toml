@@ -1,0 +1,18 @@
+[package]
+name = "shim"
+version = "0.6.0"
+edition = "2021"
+
+[dependencies]
+tao = "0.35"
+wry = "0.55"
+muda = "0.19"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
