@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  Source for og.png. Rendered to a 1200x630 PNG with headless Chrome by
+  tools/make-og.sh, so the card gets the site's real typography instead of
+  something drawn by hand. Edit this, re-run that script, redeploy.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;900&family=Space+Grotesk:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* Same tokens as index.html. See DESIGN_SYSTEM.md. */
+  :root{
+    --ink:#f1f2f4; --ink-soft:#8a9099; --paper:#0b0d0f;
+    --accent-lift:#7d9cff;
+    --grid:rgba(241,242,244,.075); --grid-step:48px; --glow:rgba(43,91,255,.12);
+  }
+  *{box-sizing:border-box; margin:0}
+  html,body{width:1200px; height:630px; overflow:hidden}
+  body{
+    background-color:var(--paper); color:var(--ink);
+    background-image:
+      radial-gradient(120vw 80vh at 8% -10%, var(--glow), transparent 60%),
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:100% 100%, 100% var(--grid-step), var(--grid-step) 100%;
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    padding:74px 80px; display:flex; flex-direction:column;
+  }
+  .top{display:flex; align-items:center; gap:14px}
+  .top svg{width:38px; height:38px}
+  .top span{font-family:'Archivo',sans-serif; font-weight:900; font-size:31px; letter-spacing:-.03em}
+  h1{
+    margin-top:auto; font-family:'Archivo',sans-serif; font-weight:900;
+    font-size:80px; line-height:.94; letter-spacing:-.035em; max-width:17ch;
+  }
+  p{margin-top:26px; font-size:25px; color:var(--ink-soft)}
+  .foot{
+    margin-top:auto; display:flex; align-items:center; justify-content:space-between;
+    font-family:'JetBrains Mono',monospace; font-size:15px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-soft);
+  }
+  .foot b{color:var(--accent-lift); font-weight:400}
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg viewBox="0 0 48 48"><rect width="48" height="48" rx="11" fill="#0b0d0f"/><path d="M24.0 24.0 L24.98 10.03 A14 14 0 0 1 36.36 30.51 Z" fill="#6366f1"/><path d="M24.0 24.0 L36.36 30.51 A14 14 0 0 1 11.64 30.51 Z" fill="#ec4899"/><path d="M24.0 24.0 L11.64 30.51 A14 14 0 0 1 23.02 10.03 Z" fill="#f59e0b"/></svg>
+    <span>Masse</span>
+  </div>
+  <h1>Every Google Inbox, Calendar, and Drive in a single app</h1>
+  <p>Simple dedicated app for managing your plethora of Google accounts.</p>
+  <div class="foot">
+    <span>masseapp.com</span>
+    <span><b>1.2 MB</b> &nbsp;/&nbsp; macOS</span>
+  </div>
+</body>
+</html>
