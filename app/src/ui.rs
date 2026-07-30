@@ -129,7 +129,7 @@ pub fn rail_html(state: &str) -> String {
       }}
     }},
   }};
-  document.getElementById('gear').onclick = () => send({{ type: 'config' }});
+  document.getElementById('gear').onclick = () => send({{ type: 'settings' }});
   document.getElementById('add').onclick = () => send({{ type: 'add' }});
   window.shim.render({state});
 </script>"#
