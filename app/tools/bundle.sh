@@ -25,8 +25,12 @@ fi
 
 # Refuse to rebuild a version that has already been released. Relying on
 # remembering to bump is how a build ships under someone else's version number.
-if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-  echo "[bundle] ERROR: v$VERSION is already tagged. Bump the version in Cargo.toml." >&2
+# Checks the remote as well as local: `gh release create` tags on the remote, so a
+# local-only check silently passes for versions that are already published.
+git fetch --tags --quiet 2>/dev/null || true
+if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null \
+   || git ls-remote --tags --exit-code origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+  echo "[bundle] ERROR: v$VERSION is already released. Bump the version in Cargo.toml." >&2
   exit 1
 fi
 
