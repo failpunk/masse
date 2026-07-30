@@ -296,7 +296,7 @@ pub fn settings_html(state: &str) -> String {
 
   <footer>
     <button class="link" id="json">Edit accounts.json</button>
-    <button class="done" id="close">Done</button>
+    <button class="done" id="close">Close</button>
   </footer>
 </div>
 <script>
