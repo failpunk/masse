@@ -23,6 +23,13 @@ if pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1 || pgrep -x masse >/dev/null 2
   pgrep -x masse >/dev/null 2>&1 && echo "[bundle] WARNING: Masse would not quit; not force-killing (cookies would be lost)"
 fi
 
+# Refuse to rebuild a version that has already been released. Relying on
+# remembering to bump is how a build ships under someone else's version number.
+if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+  echo "[bundle] ERROR: v$VERSION is already tagged. Bump the version in Cargo.toml." >&2
+  exit 1
+fi
+
 cargo build --release
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
