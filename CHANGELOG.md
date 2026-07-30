@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0
+- **Links never open in a pane.** Outbound links, and Docs/Sheets opened from
+  Drive, go to your default browser. Google's own login plumbing and the
+  signed-out bounce deliberately stay in the pane; tracking beacons are dropped
+  silently rather than becoming browser tabs.
+- Keyboard shortcuts: Cmd+1..9 for accounts, Cmd+Shift+1/2/3 for Mail, Calendar
+  and Drive, Cmd+R to reload, Cmd+, for settings. All in a Go and View menu.
+- Window size, position, and which account and app you were on are remembered.
+- Downloads land in ~/Downloads and reveal in Finder.
+
 ## 0.7.0
 - Renamed to Masse throughout. Session store migrated, so accounts carry over.
 - Settings modal behind the gear: logo, version, remove an account, memory dials.

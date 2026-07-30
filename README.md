@@ -46,6 +46,16 @@ Requires Rust and Xcode command line tools. Nothing else, no npm, no bundler.
 | [app/tools/bundle.sh](app/tools/bundle.sh) | packages Shim.app |
 | [spike/](spike/) | the throwaway that proved the approach was viable |
 
+## Keys
+
+| | |
+| --- | --- |
+| Cmd+1 .. Cmd+9 | switch account, keeping the current app |
+| Cmd+Shift+1/2/3 | Mail, Calendar, Drive, keeping the current account |
+| Cmd+R | reload the visible pane |
+| Cmd+, | settings |
+| Cmd+Q | quit. Use this, see below |
+
 ## Things worth knowing before changing anything
 
 - **The bundle identifier and the session store identifier are load bearing.**
@@ -61,6 +71,11 @@ Requires Rust and Xcode command line tools. Nothing else, no npm, no bundler.
   fixes it.
 - **The Edit menu is not decoration.** Without it macOS never routes Cmd+V into a
   WebView, so you cannot paste a password into Google's login form.
+- **Link routing is an allowlist, not a blocklist.** A pane may navigate to its
+  own app, the `accounts.*` login flow, and its own preview hosts. Everything else
+  goes to the browser, and known beacon hosts are dropped so they cannot become
+  browser tabs. wry cannot tell a subframe navigation from a top-level one, which
+  is why the drop list exists at all. See `route()` in `config.rs`.
 - **Accounts are addressed by email**, via `?authuser=`, never by the `/u/0` index.
   Those indices shift when a login is added or removed.
 - **Passkeys cannot work.** WebAuthn in a WebView needs an Apple entitlement granted

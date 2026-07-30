@@ -18,19 +18,23 @@ use tao::{
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
-use muda::{Menu, PredefinedMenuItem, Submenu};
+use muda::{accelerator::Accelerator, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use wry::{
     dpi::{LogicalPosition, LogicalSize as WrySize},
     Rect, WebView, WebViewBuilder, WebViewBuilderExtDarwin,
 };
 
-use config::{expected_host, service_url, signin_url, Account, Config, ADD, SERVICES};
+use config::{expected_host, route, service_url, signin_url, Account, Config, Route, ADD, SERVICES};
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
 
 
 /// How often to look for panes that have gone cold. Cheap: it wakes, compares a
 /// few timestamps, and goes back to sleep.
+/// Set by --test-links so the external-link path can be exercised without
+/// actually throwing browser tabs at whoever is running it.
+static DRY_RUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const SWEEP: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// One fixed identifier, shared by every pane.
@@ -63,6 +67,12 @@ enum Msg {
     Remove { email: String },
     Dials { max_live: usize, idle_minutes: u64 },
     OpenConfig,
+    /// Reload whatever pane is on screen.
+    Reload,
+    /// Hand a URL to the real browser instead of showing it in a pane.
+    External(String),
+    /// Test hook: make the visible pane attempt a navigation.
+    Drive(String),
 }
 
 struct App {
@@ -102,17 +112,25 @@ fn main() -> wry::Result<()> {
 
     // Without a real Edit menu macOS never routes Cmd+C/V/X or Cmd+A into a
     // WKWebView, so you cannot even paste a password into Google's login form.
-    install_menu();
+    install_menu(&config.accounts);
 
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let window = WindowBuilder::new()
+    let saved = config.window;
+    let mut builder = WindowBuilder::new()
         .with_title("Masse")
-        .with_inner_size(LogicalSize::new(1340.0, 900.0))
-        .with_min_inner_size(LogicalSize::new(680.0, 480.0))
-        .build(&event_loop)
-        .expect("window");
+        .with_min_inner_size(LogicalSize::new(680.0, 480.0));
+    builder = match saved {
+        Some([w, h, ..]) if w >= 680.0 && h >= 480.0 => {
+            builder.with_inner_size(LogicalSize::new(w, h))
+        }
+        _ => builder.with_inner_size(LogicalSize::new(1340.0, 900.0)),
+    };
+    let window = builder.build(&event_loop).expect("window");
+    if let Some([_, _, x, y]) = saved {
+        window.set_outer_position(tao::dpi::LogicalPosition::new(x, y));
+    }
 
     let boot = rail_state(&config, &key_of(&first.email, "mail"));
 
@@ -131,6 +149,27 @@ fn main() -> wry::Result<()> {
         .build_as_child(&window)?;
 
     let chrome = ui::Chrome { rail, topbar };
+
+    // `--test-links` drives a pane at an outbound URL and reports where it went,
+    // which is the only way to know the navigation handler is really wired.
+    if std::env::args().any(|a| a == "--test-links") {
+        DRY_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
+        let proxy = event_loop.create_proxy();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(12));
+            for url in [
+                "https://example.com/outbound",
+                "https://docs.google.com/document/d/x/edit",
+                "https://mail.google.com/mail/u/0/#settings",
+            ] {
+                println!("[test] driving pane at {url}");
+                let _ = proxy.send_event(Msg::Drive(url.to_string()));
+                std::thread::sleep(std::time::Duration::from_secs(4));
+            }
+            println!("[test] done");
+            std::process::exit(0);
+        });
+    }
 
     // `--probe` walks every account across every app and prints what each page
     // turned out to be. It is how the authuser addressing gets verified without
@@ -167,9 +206,51 @@ fn main() -> wry::Result<()> {
         *control_flow = ControlFlow::WaitUntil(std::time::Instant::now() + SWEEP);
         reclaim_idle(&app);
 
+        // muda delivers menu activations on its own channel, not through tao.
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            let id = event.id().0.clone();
+            let (email, service) = {
+                let state = app.borrow();
+                let (email, service) = state
+                    .active
+                    .split_once('\u{1}')
+                    .map(|(e, s)| (e.to_string(), s.to_string()))
+                    .unwrap_or_else(|| (state.config.accounts[0].email.clone(), "mail".into()));
+                match id.split_once(':') {
+                    // Switching account keeps the app, and vice versa.
+                    Some(("acct", n)) => match n.parse::<usize>().ok().and_then(|i| state.config.accounts.get(i)) {
+                        Some(account) => (Some(account.email.clone()), service),
+                        None => (None, service),
+                    },
+                    Some(("app", app_name)) => (Some(email), app_name.to_string()),
+                    _ => {
+                        match id.as_str() {
+                            "reload" => { let _ = proxy.send_event(Msg::Reload); }
+                            "settings" => { let _ = proxy.send_event(Msg::OpenSettings); }
+                            _ => {}
+                        }
+                        (None, service)
+                    }
+                }
+            };
+            if let Some(email) = email {
+                let _ = proxy.send_event(Msg::Show { email, service });
+            }
+        }
+
         match event {
             Event::NewEvents(StartCause::Init) => {
-                show(&app, &window, &proxy, &chrome, &first.email.clone(), "mail");
+                let (email, service) = {
+                    let state = app.borrow();
+                    match &state.config.last {
+                        // Only honour it if that account still exists.
+                        Some([email, service]) if state.config.find(email).is_some() => {
+                            (email.clone(), service.clone())
+                        }
+                        _ => (first.email.clone(), "mail".to_string()),
+                    }
+                };
+                show(&app, &window, &proxy, &chrome, &email, &service);
             }
 
             Event::UserEvent(Msg::Show { email, service }) => {
@@ -320,6 +401,27 @@ fn main() -> wry::Result<()> {
                 println!("[masse] max_live={max_live} idle_minutes={idle_minutes}");
             }
 
+            Event::UserEvent(Msg::External(url)) => {
+                println!("[masse] opening externally: {url}");
+                if !DRY_RUN.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = std::process::Command::new("open").arg(&url).spawn();
+                }
+            }
+
+            Event::UserEvent(Msg::Drive(url)) => {
+                let state = app.borrow();
+                if let Some(view) = state.panes.get(&state.active) {
+                    let _ = view.evaluate_script(&format!("location.href = {:?}", url));
+                }
+            }
+
+            Event::UserEvent(Msg::Reload) => {
+                let state = app.borrow();
+                if let Some(view) = state.panes.get(&state.active) {
+                    let _ = view.reload();
+                }
+            }
+
             Event::UserEvent(Msg::OpenConfig) => {
                 // -t forces the default *text editor* rather than whatever owns the
                 // .json extension. Without it this opens Xcode on machines where
@@ -356,7 +458,25 @@ fn main() -> wry::Result<()> {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => *control_flow = ControlFlow::Exit,
+            } => {
+                let mut state = app.borrow_mut();
+                let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+                let pos = window
+                    .outer_position()
+                    .map(|p| p.to_logical::<f64>(window.scale_factor()))
+                    .unwrap_or(tao::dpi::LogicalPosition::new(0.0, 0.0));
+                state.config.window = Some([size.width, size.height, pos.x, pos.y]);
+                let (email, service) = state
+                    .active
+                    .split_once('\u{1}')
+                    .map(|(e, s)| (e.to_string(), s.to_string()))
+                    .unwrap_or_default();
+                if !email.is_empty() && service != ADD {
+                    state.config.last = Some([email, service]);
+                }
+                state.config.save();
+                *control_flow = ControlFlow::Exit;
+            }
 
             _ => {}
         }
@@ -408,6 +528,53 @@ fn show(
             .with_url(service_url(email, service))
             .with_initialization_script(PROBE)
             .with_ipc_handler(move |req| handle_pane(&probe_proxy, &owner, &app_name, req.body()))
+            // Target=_blank links: never adopt them into this pane.
+            // Gmail marks outbound links target=_blank, so this is the main path.
+            .with_new_window_req_handler({
+                let proxy = proxy.clone();
+                let service = service.to_string();
+                move |url, _features| {
+                    if route(&service, &url) != Route::Drop {
+                        let _ = proxy.send_event(Msg::External(url));
+                    }
+                    wry::NewWindowResponse::Deny
+                }
+            })
+            // Same-pane navigations to anywhere that is not this app.
+            .with_navigation_handler({
+                let proxy = proxy.clone();
+                let service = service.to_string();
+                move |url| match route(&service, &url) {
+                    Route::Stay => true,
+                    Route::Drop => false,
+                    Route::External => {
+                        let _ = proxy.send_event(Msg::External(url));
+                        false
+                    }
+                }
+            })
+            .with_download_started_handler(|url, path| {
+                // Straight to ~/Downloads under the name the server gave it.
+                if let Some(home) = std::env::var_os("HOME") {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_owned())
+                        .unwrap_or_else(|| std::ffi::OsString::from("download"));
+                    let mut target = std::path::PathBuf::from(home);
+                    target.push("Downloads");
+                    target.push(name);
+                    *path = target;
+                }
+                println!("[masse] downloading {url} -> {}", path.display());
+                true
+            })
+            .with_download_completed_handler(|_url, path, success| match (success, path) {
+                (true, Some(path)) => {
+                    println!("[masse] saved {}", path.display());
+                    let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+                }
+                _ => eprintln!("[masse] download failed"),
+            })
             .build_as_child(window);
         match built {
             Ok(view) => {
@@ -506,17 +673,53 @@ fn content_rect(window: &Window) -> Rect {
     )
 }
 
-fn install_menu() {
+fn install_menu(accounts: &[Account]) {
     let menu = Menu::new();
     let app = Submenu::new("Masse", true);
     let edit = Submenu::new("Edit", true);
+    let view = Submenu::new("View", true);
+    let go = Submenu::new("Go", true);
+
+    let key = |spec: &str| spec.parse::<Accelerator>().ok();
+
+    let settings = MenuItem::with_id("settings", "Settings...", true, key("CmdOrCtrl+Comma"));
     let _ = app.append_items(&[
         &PredefinedMenuItem::about(None, None),
+        &PredefinedMenuItem::separator(),
+        &settings,
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::hide(None),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::quit(None),
     ]);
+
+    let _ = view.append(&MenuItem::with_id("reload", "Reload", true, key("CmdOrCtrl+R")));
+
+    // Cmd+1..9 picks an account, Cmd+Shift+1..3 picks an app.
+    for (i, account) in accounts.iter().take(9).enumerate() {
+        let label = if account.label.is_empty() {
+            account.email.clone()
+        } else {
+            format!("{} ({})", account.label, account.email)
+        };
+        let _ = go.append(&MenuItem::with_id(
+            format!("acct:{i}"),
+            label,
+            true,
+            key(&format!("CmdOrCtrl+{}", i + 1)),
+        ));
+    }
+    let _ = go.append(&PredefinedMenuItem::separator());
+    for (i, service) in SERVICES.iter().enumerate() {
+        let mut label = service.to_string();
+        label.get_mut(0..1).map(|c| c.make_ascii_uppercase());
+        let _ = go.append(&MenuItem::with_id(
+            format!("app:{service}"),
+            label,
+            true,
+            key(&format!("CmdOrCtrl+Shift+{}", i + 1)),
+        ));
+    }
     let _ = edit.append_items(&[
         &PredefinedMenuItem::undo(None),
         &PredefinedMenuItem::redo(None),
@@ -526,7 +729,7 @@ fn install_menu() {
         &PredefinedMenuItem::paste(None),
         &PredefinedMenuItem::select_all(None),
     ]);
-    let _ = menu.append_items(&[&app, &edit]);
+    let _ = menu.append_items(&[&app, &edit, &view, &go]);
     menu.init_for_nsapp();
 }
 

@@ -45,6 +45,12 @@ pub struct Config {
     /// back. The pane on screen is exempt. 0 turns the timeout off.
     #[serde(default = "default_idle_minutes")]
     pub idle_minutes: u64,
+    /// Window geometry from last quit: width, height, x, y.
+    #[serde(default)]
+    pub window: Option<[f64; 4]>,
+    /// Where you were when you quit: email then service.
+    #[serde(default)]
+    pub last: Option<[String; 2]>,
 }
 
 fn default_max_live() -> usize {
@@ -65,6 +71,8 @@ impl Default for Config {
             accounts: vec![],
             max_live: default_max_live(),
             idle_minutes: default_idle_minutes(),
+            window: None,
+            last: None,
         }
     }
 }
@@ -185,6 +193,100 @@ fn encode(raw: &str) -> String {
         .collect()
 }
 
+/// What to do with a navigation a pane is attempting.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Route {
+    /// Belongs to this pane's app. Let it happen.
+    Stay,
+    /// A link. Hand it to the real browser.
+    External,
+    /// Block it and tell nobody. Analytics and ad beacons arrive as navigations
+    /// wry cannot distinguish from top-level ones, and throwing those at the
+    /// browser opens junk tabs.
+    Drop,
+}
+
+/// Hosts that only ever appear as tracking beacons.
+const TRACKERS: [&str; 6] = [
+    "doubleclick.net",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "adservice.google.com",
+];
+
+pub fn route(service: &str, url: &str) -> Route {
+    if stays_in_pane(service, url) {
+        return Route::Stay;
+    }
+    match host_of(url) {
+        Some(host)
+            if TRACKERS
+                .iter()
+                .any(|t| host == *t || host.ends_with(&format!(".{t}"))) =>
+        {
+            Route::Drop
+        }
+        // Anything not http(s) is not a page we can hand to a browser sensibly.
+        _ if !url.starts_with("http://") && !url.starts_with("https://") => Route::Drop,
+        _ => Route::External,
+    }
+}
+
+/// Whether a navigation belongs inside its pane, or is an outbound link that
+/// should go to the real browser.
+///
+/// Deliberately a short allowlist rather than a blocklist: a pane is for exactly
+/// one Google app, plus the login flow it may be bounced through. Anything else,
+/// including Docs and Sheets opened from Drive, is somebody else's page and opens
+/// in the browser where history, extensions and password manager live.
+pub fn stays_in_pane(service: &str, url: &str) -> bool {
+    // In-page navigations carry no host and must never be treated as outbound.
+    for scheme in ["about:", "blob:", "data:", "javascript:"] {
+        if url.starts_with(scheme) {
+            return true;
+        }
+    }
+    match host_of(url) {
+        None => true,
+        Some(host) => {
+            host == expected_host(service)
+                // The sign-in flow, which a pane legitimately gets redirected into.
+                // Google checks login state across its properties during sign-in
+                // (accounts.youtube.com/CheckConnection and friends), so the whole
+                // accounts.* family stays in the pane. Letting those out puts stray
+                // tabs in the browser mid-login.
+                || host.split('.').next() == Some("accounts")
+                // Signed-out marketing pages: reached only as a bounce, and handled
+                // by sending the pane to the login page instead.
+                || is_signed_out_bounce(url)
+                // Attachment and image previews served for the pane itself.
+                || host.ends_with(".googleusercontent.com")
+                || host == "drive.usercontent.google.com"
+        }
+    }
+}
+
+/// The marketing page Google redirects to when you ask for an app while signed
+/// out. Not a destination anyone wants: the pane gets sent to the login instead.
+pub fn is_signed_out_bounce(url: &str) -> bool {
+    matches!(host_of(url), Some("workspace.google.com"))
+}
+
+fn host_of(url: &str) -> Option<&str> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    // Drop any userinfo and port so comparisons are on the bare host.
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = host.split_once(':').map_or(host, |(h, _)| h);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
+
 pub fn initials(account: &Account) -> String {
     let source = if account.label.trim().is_empty() {
         account.email.trim()
@@ -267,6 +369,74 @@ mod tests {
     }
 
     #[test]
+    fn outbound_links_leave_the_pane() {
+        // The pane's own app stays put.
+        assert!(stays_in_pane("mail", "https://mail.google.com/mail/u/0/#inbox"));
+        assert!(stays_in_pane("calendar", "https://calendar.google.com/calendar/r/day"));
+        // Login is part of a pane's legitimate life.
+        assert!(stays_in_pane("mail", "https://accounts.google.com/v3/signin/identifier"));
+        // Previews the pane itself serves.
+        assert!(stays_in_pane("mail", "https://lh3.googleusercontent.com/a/x=s96-c"));
+
+        // Everything else is a link, and links belong in the browser.
+        assert!(!stays_in_pane("mail", "https://example.com/article"));
+        assert!(!stays_in_pane("mail", "https://www.google.com/url?q=https://x.com"));
+        assert!(!stays_in_pane("mail", "https://calendar.google.com/calendar/r"));
+        assert!(!stays_in_pane("drive", "https://docs.google.com/document/d/abc/edit"));
+    }
+
+    #[test]
+    fn the_login_flow_is_never_pushed_to_the_browser() {
+        // Google's cross-property login check during sign-in.
+        assert!(stays_in_pane(
+            "mail",
+            "https://accounts.youtube.com/accounts/CheckConnection?pmpo=x"
+        ));
+        assert!(stays_in_pane("mail", "https://accounts.google.com/v3/signin/identifier"));
+        // But youtube proper is still just a link.
+        assert!(!stays_in_pane("mail", "https://www.youtube.com/watch?v=x"));
+    }
+
+    #[test]
+    fn the_signed_out_bounce_stays_in_the_pane_to_be_rescued() {
+        let bounce = "https://workspace.google.com/intl/en-US/gmail/";
+        assert!(is_signed_out_bounce(bounce));
+        assert!(stays_in_pane("mail", bounce), "must not escape to the browser");
+        assert!(!is_signed_out_bounce("https://mail.google.com/mail/u/0/"));
+    }
+
+    #[test]
+    fn beacons_are_dropped_rather_than_opened_in_the_browser() {
+        assert_eq!(
+            route("mail", "https://2507573.fls.doubleclick.net/activityi;src=x"),
+            Route::Drop
+        );
+        assert_eq!(route("mail", "https://www.google-analytics.com/collect"), Route::Drop);
+        // A real link still goes out.
+        assert_eq!(route("mail", "https://example.com/article"), Route::External);
+        // The pane's own app is untouched.
+        assert_eq!(route("mail", "https://mail.google.com/mail/u/0/"), Route::Stay);
+        // Odd schemes are dropped, not shelled out to `open`.
+        assert_eq!(route("mail", "itms-apps://apps.apple.com/x"), Route::Drop);
+        // A tracker lookalike is not a tracker.
+        assert_eq!(route("mail", "https://notdoubleclick.net/x"), Route::External);
+    }
+
+    #[test]
+    fn host_parsing_is_not_fooled_by_lookalikes() {
+        // A host that merely contains the allowed name must not pass.
+        assert!(!stays_in_pane("mail", "https://mail.google.com.evil.test/x"));
+        assert!(!stays_in_pane("mail", "https://evil.test/mail.google.com"));
+        // Userinfo must not be mistaken for the host.
+        assert!(!stays_in_pane("mail", "https://mail.google.com@evil.test/x"));
+        // A port is not part of the host.
+        assert!(stays_in_pane("mail", "https://mail.google.com:443/mail/u/0/"));
+        // In-page schemes are never outbound.
+        assert!(stays_in_pane("mail", "about:blank"));
+        assert!(stays_in_pane("mail", "blob:https://mail.google.com/abc"));
+    }
+
+    #[test]
     fn initials_prefer_the_label() {
         assert_eq!(initials(&account("AE Studio", "j@ae.studio")), "AS");
         assert_eq!(initials(&account("Personal", "j@gmail.com")), "P");
@@ -279,6 +449,8 @@ mod tests {
             accounts: vec![account("One", "One@Gmail.com")],
             max_live: 2,
             idle_minutes: 15,
+            window: None,
+            last: None,
         };
         assert!(config.find(" one@gmail.COM ").is_some());
         assert!(config.find("other@gmail.com").is_none());
