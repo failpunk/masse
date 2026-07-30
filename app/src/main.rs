@@ -33,6 +33,11 @@ use ui::{RAIL_W, TOPBAR_H};
 /// few timestamps, and goes back to sleep.
 /// Set by --test-links so the external-link path can be exercised without
 /// actually throwing browser tabs at whoever is running it.
+/// Counts panes actually shown, so --fire-menu can tell "nothing crashed" apart
+/// from "nothing happened". The first version of that test passed while every
+/// menu activation was silently doing nothing.
+static SHOWN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 static DRY_RUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const SWEEP: std::time::Duration = std::time::Duration::from_secs(30);
@@ -73,6 +78,8 @@ enum Msg {
     External(String),
     /// Test hook: make the visible pane attempt a navigation.
     Drive(String),
+    /// A menu item fired. Carries muda's item id.
+    Menu(String),
 }
 
 struct App {
@@ -157,14 +164,28 @@ fn main() -> wry::Result<()> {
     if std::env::args().any(|a| a == "--fire-menu") {
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(10));
-            for (menu_title, count) in [("Go", 4usize), ("View", 1), ("Masse", 1)] {
-                for index in 0..count {
+            let plan: [(&str, &[usize]); 3] = [
+                // Accounts, then the three apps. Index 2 is a separator.
+                ("Go", &[0, 1, 3, 4, 5]),
+                ("View", &[0]),
+                ("Masse", &[0]),
+            ];
+            for (menu_title, indices) in plan {
+                for index in indices {
                     println!("[fire] {menu_title} item {index}");
-                    fire_menu_item(menu_title, index);
+                    fire_menu_item(menu_title, *index);
                     std::thread::sleep(std::time::Duration::from_millis(700));
                 }
             }
-            println!("[fire] survived every menu activation");
+            let shown = SHOWN.load(std::sync::atomic::Ordering::Relaxed);
+            // Four Go items were fired, so at least that many switches must have
+            // landed. Anything less means activations are being dropped.
+            // One show at startup plus the five Go activations.
+            if shown < 6 {
+                eprintln!("[fire] FAILED: only {shown} panes shown; menu actions are not landing");
+                std::process::exit(1);
+            }
+            println!("[fire] survived every menu activation, {shown} panes shown");
             std::process::exit(0);
         });
     }
@@ -242,6 +263,13 @@ fn main() -> wry::Result<()> {
         });
     }
 
+    let menu_proxy = proxy.clone();
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        // Runs on the main thread inside the AppKit action. Enqueuing wakes the
+        // event loop immediately, which polling never did.
+        let _ = menu_proxy.send_event(Msg::Menu(event.id().0.clone()));
+    }));
+
     let app = Rc::new(RefCell::new(App {
         lru: Lru::new(config.max_live),
         active: key_of(&first.email, "mail"),
@@ -258,43 +286,6 @@ fn main() -> wry::Result<()> {
 
         *control_flow = ControlFlow::WaitUntil(std::time::Instant::now() + SWEEP);
         reclaim_idle(&app);
-
-        // muda delivers menu activations on its own channel, not through tao.
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
-            let id = event.id().0.clone();
-            let Ok(state) = app.try_borrow() else {
-                // Mid-switch. Drop this activation rather than panicking.
-                eprintln!("[masse] ignoring menu action while busy: {id}");
-                continue;
-            };
-            let (email, service) = {
-                let (email, service) = state
-                    .active
-                    .split_once('\u{1}')
-                    .map(|(e, s)| (e.to_string(), s.to_string()))
-                    .unwrap_or_else(|| (state.config.accounts[0].email.clone(), "mail".into()));
-                match id.split_once(':') {
-                    // Switching account keeps the app, and vice versa.
-                    Some(("acct", n)) => match n.parse::<usize>().ok().and_then(|i| state.config.accounts.get(i)) {
-                        Some(account) => (Some(account.email.clone()), service),
-                        None => (None, service),
-                    },
-                    Some(("app", app_name)) => (Some(email), app_name.to_string()),
-                    _ => {
-                        match id.as_str() {
-                            "reload" => { let _ = proxy.send_event(Msg::Reload); }
-                            "settings" => { let _ = proxy.send_event(Msg::OpenSettings); }
-                            _ => {}
-                        }
-                        (None, service)
-                    }
-                }
-            };
-            drop(state);
-            if let Some(email) = email {
-                let _ = proxy.send_event(Msg::Show { email, service });
-            }
-        }
 
         match event {
             Event::NewEvents(StartCause::Init) => {
@@ -313,6 +304,42 @@ fn main() -> wry::Result<()> {
 
             Event::UserEvent(Msg::Show { email, service }) => {
                 show(&app, &window, &proxy, &chrome, &email, &service);
+            }
+
+            Event::UserEvent(Msg::Menu(id)) => {
+                let target = {
+                    let Ok(state) = app.try_borrow() else { return };
+                    let (email, service) = state
+                        .active
+                        .split_once('\u{1}')
+                        .map(|(e, s)| (e.to_string(), s.to_string()))
+                        .unwrap_or_else(|| (state.config.accounts[0].email.clone(), "mail".into()));
+                    match id.split_once(':') {
+                        // Switching account keeps the app, and vice versa.
+                        Some(("acct", n)) => n
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|i| state.config.accounts.get(i))
+                            .map(|a| (a.email.clone(), service)),
+                        Some(("app", app_name)) => Some((email, app_name.to_string())),
+                        _ => None,
+                    }
+                };
+                match (target, id.as_str()) {
+                    (Some((email, service)), _) => {
+                        show(&app, &window, &proxy, &chrome, &email, &service)
+                    }
+                    (None, "reload") => {
+                        let Ok(state) = app.try_borrow() else { return };
+                        if let Some(view) = state.panes.get(&state.active) {
+                            let _ = view.reload();
+                        }
+                    }
+                    (None, "settings") => {
+                        let _ = proxy.send_event(Msg::OpenSettings);
+                    }
+                    _ => {}
+                }
             }
 
             Event::UserEvent(Msg::Landed { email, service, url }) => {
@@ -367,7 +394,7 @@ fn main() -> wry::Result<()> {
             }
 
             Event::UserEvent(Msg::OpenSettings) => {
-                let Ok(mut state) = app.try_borrow_mut() else { return };
+                let Ok(state) = app.try_borrow_mut() else { return };
                 if state.settings.is_none() {
                     // Hide the pane underneath so the modal is unambiguously on top
                     // whatever the subview order happens to be.
@@ -592,6 +619,7 @@ fn show(
     email: &str,
     service: &str,
 ) {
+    SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let key = key_of(email, service);
     let bounds = content_rect(window);
     let mut state = app.borrow_mut();
@@ -772,7 +800,6 @@ struct MenuKeepAlive {
     _items: Vec<MenuItem>,
 }
 
-#[must_use = "dropping this dangles the pointers AppKit holds into the menu"]
 /// Ask AppKit to perform a menu item, exactly as a key equivalent would.
 fn fire_menu_item(menu_title: &str, index: usize) {
     use objc2::rc::autoreleasepool;
@@ -836,6 +863,7 @@ fn dispatch_on_main<F: FnOnce() + Send + 'static>(work: F) {
     }
 }
 
+#[must_use = "dropping this dangles the pointers AppKit holds into the menu"]
 fn install_menu(accounts: &[Account]) -> MenuKeepAlive {
     let menu = Menu::new();
     let app = Submenu::new("Masse", true);
