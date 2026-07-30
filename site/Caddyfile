@@ -1,0 +1,8 @@
+# Railway injects PORT; Caddy reads it directly.
+:{$PORT:8080} {
+	root * /srv
+	file_server
+	encode gzip
+	header /Masse.zip Content-Disposition "attachment; filename=Masse.zip"
+	header /* Cache-Control "public, max-age=300"
+}

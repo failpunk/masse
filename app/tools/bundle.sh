@@ -76,5 +76,12 @@ else
   echo "[bundle] WARNING: could not install to $INSTALLED; run it from $APP"
 fi
 
+# Refresh the landing page's download so it can never be an older build than the
+# app. ditto, not zip: it preserves the bundle layout and the code signature.
+if [ -d ../site ]; then
+  ditto -c -k --keepParent "$INSTALLED" ../site/Masse.zip 2>/dev/null \
+    && echo "[bundle] refreshed ../site/Masse.zip"
+fi
+
 echo "[bundle] built $APP (v$VERSION, $BUNDLE_ID)"
 du -sh "$APP" | awk '{print "[bundle] size " $1}'
