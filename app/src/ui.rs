@@ -250,8 +250,12 @@ pub fn settings_html(state: &str) -> String {
   .dial label {{ flex: 1; font-size: 12.5px; }}
   .dial small {{ display: block; color: rgba(255,255,255,.38); font-size: 11px; margin-top: 2px; }}
   input {{
-    width: 62px; font: inherit; text-align: center; padding: 5px; border-radius: 7px;
+    width: 56px; font: inherit; text-align: center; padding: 5px; border-radius: 7px;
     border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: #fff;
+  }}
+  .withunit {{
+    display: flex; align-items: center; gap: 7px; white-space: nowrap;
+    color: rgba(255,255,255,.55); font-size: 12.5px;
   }}
   footer {{ display: flex; align-items: center; gap: 10px; margin-top: 20px; }}
   .link {{ font-size: 11.5px; color: rgba(255,255,255,.35); text-decoration: underline; }}
@@ -286,8 +290,8 @@ pub fn settings_html(state: &str) -> String {
   </div>
   <div class="dial">
     <label>Close unused panes after
-      <small>Minutes. 0 keeps them loaded forever.</small></label>
-    <input id="idle" type="number" min="0" max="600">
+      <small>0 keeps them loaded forever.</small></label>
+    <span class="withunit"><input id="idle" type="number" min="0" max="600"> minutes</span>
   </div>
 
   <footer>
