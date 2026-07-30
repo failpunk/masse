@@ -3,7 +3,6 @@
 	root * /srv
 	file_server
 	encode gzip
-	header /Masse.zip Content-Disposition "attachment; filename=Masse.zip"
 	header /* Cache-Control "public, max-age=300"
 	# Short cache on the icons: browsers hold favicons far longer than they should,
 	# and a stale one looks like a broken deploy.
