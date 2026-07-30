@@ -215,7 +215,7 @@ pub fn settings_html(state: &str) -> String {
 <style>
   {SHARED_CSS}
   body {{
-    height: 100vh; display: grid; place-items: center; padding: 28px 28px 68px;
+    height: 100vh; display: grid; place-items: center; padding: 28px 28px 80px;
     background: rgba(8, 9, 13, .78); backdrop-filter: blur(14px);
   }}
   .card {{
@@ -267,18 +267,26 @@ pub fn settings_html(state: &str) -> String {
     color: rgba(255,255,255,.55); font-size: 12.5px;
   }}
   footer {{ display: flex; align-items: center; gap: 10px; margin-top: 20px; }}
-  /* Pinned to the bottom of the overlay, outside the card, so it reads as a line
-     across the app rather than another row of settings. */
+  /* A floating pill, centred over the bottom of the overlay. Detached from the
+     edges so it reads as an object sitting on top rather than a docked bar. */
   .promo {{
-    position: fixed; left: 0; right: 0; bottom: 0;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 11px 16px; background: rgba(255,255,255,.06);
-    border-top: 1px solid rgba(255,255,255,.10);
-    font-size: 12.5px; color: rgba(255,255,255,.62); cursor: pointer;
-    transition: background .12s ease, color .12s ease;
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+    padding: 11px 20px; border-radius: 999px;
+    background: rgba(32,36,44,.92);
+    box-shadow: 0 8px 28px -6px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.13);
+    backdrop-filter: blur(10px);
+    font-size: 12.5px; color: rgba(255,255,255,.72); cursor: pointer;
+    transition: transform .16s cubic-bezier(.22,1,.36,1), background .12s ease,
+                color .12s ease, box-shadow .16s ease;
   }}
-  .promo:hover {{ background: rgba(255,255,255,.11); color: #fff; }}
-  .promo svg {{ width: 13px; height: 13px; opacity: .8; }}
+  .promo:hover {{
+    background: rgba(44,49,59,.96); color: #fff;
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 12px 34px -6px rgba(0,0,0,.68), 0 0 0 1px rgba(255,255,255,.22);
+  }}
+  .promo:active {{ transform: translateX(-50%) translateY(0); }}
+  .promo svg {{ width: 13px; height: 13px; opacity: .75; }}
   .link {{ font-size: 11.5px; color: rgba(255,255,255,.35); text-decoration: underline; }}
   .link:hover {{ color: #fff; }}
   .done {{
