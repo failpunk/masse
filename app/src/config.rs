@@ -216,19 +216,52 @@ const TRACKERS: [&str; 6] = [
     "adservice.google.com",
 ];
 
+/// Google's own infrastructure. Gmail is built out of iframes pointing at these:
+/// the apps launcher (ogs), the feedback widget (clients6), the Calendar side
+/// panel. wry reports subframe loads through the same handler as top-level
+/// navigations, so treating these as outbound opened a browser tab per widget
+/// every time Gmail loaded.
+fn is_google_owned(host: &str) -> bool {
+    const OWNED: [&str; 5] = [
+        "google.com",
+        "googleapis.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "googlemail.com",
+    ];
+    OWNED
+        .iter()
+        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
+fn is_tracker(host: &str) -> bool {
+    TRACKERS
+        .iter()
+        .any(|t| host == *t || host.ends_with(&format!(".{t}")))
+}
+
+/// For navigations a pane makes on its own, including subframes. Conservative on
+/// purpose: only a genuinely third-party page is worth ejecting, because anything
+/// Google-owned is probably a piece of the app rather than a link.
 pub fn route(service: &str, url: &str) -> Route {
     if stays_in_pane(service, url) {
         return Route::Stay;
     }
     match host_of(url) {
-        Some(host)
-            if TRACKERS
-                .iter()
-                .any(|t| host == *t || host.ends_with(&format!(".{t}"))) =>
-        {
-            Route::Drop
-        }
-        // Anything not http(s) is not a page we can hand to a browser sensibly.
+        None => Route::Stay,
+        Some(host) if is_tracker(host) => Route::Drop,
+        Some(host) if is_google_owned(host) => Route::Stay,
+        _ if !url.starts_with("http://") && !url.starts_with("https://") => Route::Drop,
+        _ => Route::External,
+    }
+}
+
+/// For target=_blank, which is how Gmail, Calendar and Drive mark a real link the
+/// user clicked. Everything leaves, including Google's own apps, because a link is
+/// a link. Nothing is silently swallowed except beacons.
+pub fn route_link(_service: &str, url: &str) -> Route {
+    match host_of(url) {
+        Some(host) if is_tracker(host) => Route::Drop,
         _ if !url.starts_with("http://") && !url.starts_with("https://") => Route::Drop,
         _ => Route::External,
     }
@@ -386,6 +419,12 @@ mod tests {
     }
 
     #[test]
+    fn a_lookalike_domain_is_not_treated_as_google() {
+        assert_eq!(route("mail", "https://google.com.evil.test/x"), Route::External);
+        assert_eq!(route("mail", "https://notgoogle.com/x"), Route::External);
+    }
+
+    #[test]
     fn the_login_flow_is_never_pushed_to_the_browser() {
         // Google's cross-property login check during sign-in.
         assert!(stays_in_pane(
@@ -403,6 +442,30 @@ mod tests {
         assert!(is_signed_out_bounce(bounce));
         assert!(stays_in_pane("mail", bounce), "must not escape to the browser");
         assert!(!is_signed_out_bounce("https://mail.google.com/mail/u/0/"));
+    }
+
+    #[test]
+    fn gmails_own_widgets_never_become_browser_tabs() {
+        // Every one of these opened a Chrome tab in 0.8.1 on each Gmail load.
+        for url in [
+            "https://ogs.google.com/u/0/widget/app?origin=https%3A%2F%2Fmail.google.com",
+            "https://feedback-pa.clients6.google.com/static/proxy.html?usegapi=1",
+            "https://calendar.google.com/calendar/u/0/companion?origin=x",
+            "https://www.gstatic.com/og/_/js/k=og.qtm.en_US.x",
+            "https://content.googleapis.com/static/proxy.html",
+        ] {
+            assert_eq!(route("mail", url), Route::Stay, "{url}");
+        }
+        // A third-party frame still leaves.
+        assert_eq!(route("mail", "https://example.com/tracking-frame"), Route::External);
+    }
+
+    #[test]
+    fn a_clicked_link_always_leaves_even_when_google_owns_it() {
+        assert_eq!(route_link("mail", "https://docs.google.com/document/d/x/edit"), Route::External);
+        assert_eq!(route_link("mail", "https://example.com/post"), Route::External);
+        assert_eq!(route_link("mail", "https://www.google-analytics.com/x"), Route::Drop);
+        assert_eq!(route_link("mail", "mailto:someone@example.com"), Route::Drop);
     }
 
     #[test]

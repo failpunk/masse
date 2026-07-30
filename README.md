@@ -61,6 +61,12 @@ Requires Rust and Xcode command line tools. Nothing else, no npm, no bundler.
 - **The bundle identifier and the session store identifier are load bearing.**
   `com.failpunk.shim` in `bundle.sh` and `SESSION_STORE` in `main.rs` together
   decide where cookies live. Change either and every account is signed out.
+- **The menu must never be dropped.** muda keeps a raw pointer to each item's
+  `MenuChild` inside the NSMenuItem and dereferences it whenever the item fires, so
+  dropping the Rust handles turns every menu activation into a use-after-free. They
+  are held in `MenuKeepAlive`, captured by the event loop. `--fire-menu` performs
+  every item through AppKit and catches this; a keypress is the only other way, and
+  no unit test reaches it.
 - **Never hold a `RefCell` borrow across an AppKit or WebKit call.** Creating,
   destroying, focusing or scripting a WebView pumps the macOS run loop, which
   re-enters the tao event handler. A borrow still live at that moment panics and,

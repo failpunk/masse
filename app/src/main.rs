@@ -24,7 +24,7 @@ use wry::{
     Rect, WebView, WebViewBuilder, WebViewBuilderExtDarwin,
 };
 
-use config::{expected_host, route, service_url, signin_url, Account, Config, Route, ADD, SERVICES};
+use config::{expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD, SERVICES};
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
 
@@ -112,7 +112,7 @@ fn main() -> wry::Result<()> {
 
     // Without a real Edit menu macOS never routes Cmd+C/V/X or Cmd+A into a
     // WKWebView, so you cannot even paste a password into Google's login form.
-    install_menu(&config.accounts);
+    let menu_keepalive = install_menu(&config.accounts);
 
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     let proxy = event_loop.create_proxy();
@@ -149,6 +149,25 @@ fn main() -> wry::Result<()> {
         .build_as_child(&window)?;
 
     let chrome = ui::Chrome { rail, topbar };
+
+    // `--fire-menu` performs every custom menu item through AppKit, which is the
+    // only path that reproduces the dangling-MenuChild crash: a keypress goes
+    // NSMenu -> sendAction: -> muda's fire_menu_item_click, and that is where the
+    // raw pointer gets dereferenced. Nothing else exercises it.
+    if std::env::args().any(|a| a == "--fire-menu") {
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            for (menu_title, count) in [("Go", 4usize), ("View", 1), ("Masse", 1)] {
+                for index in 0..count {
+                    println!("[fire] {menu_title} item {index}");
+                    fire_menu_item(menu_title, index);
+                    std::thread::sleep(std::time::Duration::from_millis(700));
+                }
+            }
+            println!("[fire] survived every menu activation");
+            std::process::exit(0);
+        });
+    }
 
     // `--stress` fires switches faster than panes can finish building, which is
     // how the RefCell double-borrow crash reproduces without a keyboard.
@@ -233,6 +252,10 @@ fn main() -> wry::Result<()> {
     }));
 
     event_loop.run(move |event, _target, control_flow| {
+        // Captured so the menu's allocations live as long as the process does.
+        // AppKit holds raw pointers into them. Do not remove.
+        let _keep = &menu_keepalive;
+
         *control_flow = ControlFlow::WaitUntil(std::time::Instant::now() + SWEEP);
         reclaim_idle(&app);
 
@@ -589,7 +612,7 @@ fn show(
                 let proxy = proxy.clone();
                 let service = service.to_string();
                 move |url, _features| {
-                    if route(&service, &url) != Route::Drop {
+                    if route_link(&service, &url) != Route::Drop {
                         let _ = proxy.send_event(Msg::External(url));
                     }
                     wry::NewWindowResponse::Deny
@@ -736,7 +759,84 @@ fn content_rect(window: &Window) -> Rect {
     )
 }
 
-fn install_menu(accounts: &[Account]) {
+/// Everything the menu bar is made of, which must outlive the process.
+///
+/// muda stores a raw pointer to each item's `MenuChild` inside the NSMenuItem and
+/// dereferences it on every activation. Dropping these handles leaves that pointer
+/// dangling, so the first Cmd+1 read a String out of freed memory. Predefined
+/// items (Quit, Copy, Paste) are wired straight to AppKit selectors, which is why
+/// only the custom items crashed.
+struct MenuKeepAlive {
+    _menu: Menu,
+    _submenus: Vec<Submenu>,
+    _items: Vec<MenuItem>,
+}
+
+#[must_use = "dropping this dangles the pointers AppKit holds into the menu"]
+/// Ask AppKit to perform a menu item, exactly as a key equivalent would.
+fn fire_menu_item(menu_title: &str, index: usize) {
+    use objc2::rc::autoreleasepool;
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+
+    // AppKit is main-thread only, so hop there and wait for it.
+    let (title, done) = (menu_title.to_string(), std::sync::Arc::new(
+        std::sync::atomic::AtomicBool::new(false),
+    ));
+    let flag = done.clone();
+    dispatch_on_main(move || {
+        autoreleasepool(|_| {
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            let app = NSApplication::sharedApplication(mtm);
+            let Some(main_menu) = app.mainMenu() else { return };
+            for i in 0..unsafe { main_menu.numberOfItems() } {
+                let item = unsafe { main_menu.itemAtIndex(i) };
+                let Some(item) = item else { continue };
+                if unsafe { item.title() }.to_string() != title {
+                    continue;
+                }
+                if let Some(submenu) = unsafe { item.submenu() } {
+                    if index < unsafe { submenu.numberOfItems() } as usize {
+                        unsafe { submenu.performActionForItemAtIndex(index as isize) };
+                    }
+                }
+            }
+        });
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    for _ in 0..200 {
+        if done.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn dispatch_on_main<F: FnOnce() + Send + 'static>(work: F) {
+    // Minimal main-queue hop without pulling in a dispatch crate.
+    let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(work));
+    extern "C" fn trampoline(ctx: *mut std::ffi::c_void) {
+        let work: Box<Box<dyn FnOnce() + Send>> = unsafe { Box::from_raw(ctx as *mut _) };
+        work();
+    }
+    extern "C" {
+        fn dispatch_async_f(
+            queue: *mut std::ffi::c_void,
+            context: *mut std::ffi::c_void,
+            work: extern "C" fn(*mut std::ffi::c_void),
+        );
+        static _dispatch_main_q: std::ffi::c_void;
+    }
+    unsafe {
+        dispatch_async_f(
+            &_dispatch_main_q as *const _ as *mut _,
+            Box::into_raw(boxed) as *mut _,
+            trampoline,
+        );
+    }
+}
+
+fn install_menu(accounts: &[Account]) -> MenuKeepAlive {
     let menu = Menu::new();
     let app = Submenu::new("Masse", true);
     let edit = Submenu::new("Edit", true);
@@ -745,7 +845,9 @@ fn install_menu(accounts: &[Account]) {
 
     let key = |spec: &str| spec.parse::<Accelerator>().ok();
 
+    let mut items = Vec::new();
     let settings = MenuItem::with_id("settings", "Settings...", true, key("CmdOrCtrl+Comma"));
+    items.push(settings.clone());
     let _ = app.append_items(&[
         &PredefinedMenuItem::about(None, None),
         &PredefinedMenuItem::separator(),
@@ -756,7 +858,9 @@ fn install_menu(accounts: &[Account]) {
         &PredefinedMenuItem::quit(None),
     ]);
 
-    let _ = view.append(&MenuItem::with_id("reload", "Reload", true, key("CmdOrCtrl+R")));
+    let reload = MenuItem::with_id("reload", "Reload", true, key("CmdOrCtrl+R"));
+    let _ = view.append(&reload);
+    items.push(reload);
 
     // Cmd+1..9 picks an account, Cmd+Shift+1..3 picks an app.
     for (i, account) in accounts.iter().take(9).enumerate() {
@@ -765,23 +869,27 @@ fn install_menu(accounts: &[Account]) {
         } else {
             format!("{} ({})", account.label, account.email)
         };
-        let _ = go.append(&MenuItem::with_id(
+        let item = MenuItem::with_id(
             format!("acct:{i}"),
             label,
             true,
             key(&format!("CmdOrCtrl+{}", i + 1)),
-        ));
+        );
+        let _ = go.append(&item);
+        items.push(item);
     }
     let _ = go.append(&PredefinedMenuItem::separator());
     for (i, service) in SERVICES.iter().enumerate() {
         let mut label = service.to_string();
         label.get_mut(0..1).map(|c| c.make_ascii_uppercase());
-        let _ = go.append(&MenuItem::with_id(
+        let item = MenuItem::with_id(
             format!("app:{service}"),
             label,
             true,
             key(&format!("CmdOrCtrl+Shift+{}", i + 1)),
-        ));
+        );
+        let _ = go.append(&item);
+        items.push(item);
     }
     let _ = edit.append_items(&[
         &PredefinedMenuItem::undo(None),
@@ -794,6 +902,12 @@ fn install_menu(accounts: &[Account]) {
     ]);
     let _ = menu.append_items(&[&app, &edit, &view, &go]);
     menu.init_for_nsapp();
+
+    MenuKeepAlive {
+        _menu: menu,
+        _submenus: vec![app, edit, view, go],
+        _items: items,
+    }
 }
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
