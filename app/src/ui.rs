@@ -50,8 +50,8 @@ pub fn rail_html(state: &str) -> String {
 <style>
   {SHARED_CSS}
   body {{
-    height: 100vh; padding: 10px 0 12px; display: flex; flex-direction: column;
-    align-items: center; gap: 8px;
+    height: 100vh; padding: 14px 0 12px; display: flex; flex-direction: column;
+    align-items: center; gap: 14px;
   }}
   .ava {{
     width: 46px; height: 46px; border-radius: 50%; overflow: hidden; position: relative;
@@ -87,7 +87,7 @@ pub fn rail_html(state: &str) -> String {
   .gear:hover {{ background: rgba(255,255,255,.16); color: #fff; }}
   .gear:active {{ background: rgba(255,255,255,.24); }}
 </style>
-<div id="rail" style="display:flex;flex-direction:column;align-items:center;gap:8px;width:100%"></div>
+<div id="rail" style="display:flex;flex-direction:column;align-items:center;gap:14px;width:100%"></div>
 <button class="add" id="add" title="Add a Google account">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <path d="M12 6v12M6 12h12"/>
