@@ -14,9 +14,10 @@
     --font-display:'Archivo',system-ui,sans-serif;
     --font-body:'Space Grotesk',system-ui,sans-serif;
     --font-mono:'JetBrains Mono',ui-monospace,monospace;
-    --ink:#0b0d0f; --ink-soft:#5b6169; --paper:#f1f2f4; --paper-lift:#fff; --accent:#1b4dff;
+    --paper:#0b0d0f; --ink:#f1f2f4; --ink-soft:#8a9099;
+    --surface:#14171b; --screen:#fff; --accent:#2b5bff; --accent-lift:#7d9cff;
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:72px; --s9:112px;
-    --rule:1px solid var(--ink); --rule-soft:1px solid #d3d6da;
+    --rule:1px solid #2a2f36; --rule-soft:1px solid #1c2027;
     --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
   }
   *,*::before,*::after{box-sizing:border-box}
@@ -57,19 +58,19 @@
 
   /* The one figure: a replica of the app's own chrome */
   figure{margin:0; border-top:var(--rule); padding:var(--s8) 0}
-  .app{border:var(--rule); background:var(--paper-lift); display:flex; height:340px; overflow:hidden}
+  .app{border:var(--rule); background:var(--surface); display:flex; height:340px; overflow:hidden}
   .rail{
-    width:64px; flex:none; background:#11131a; display:flex; flex-direction:column;
+    width:64px; flex:none; background:#0e1014; border-right:var(--rule-soft); display:flex; flex-direction:column;
     align-items:center; gap:14px; padding:var(--s3) 0;
   }
   .face{width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
         font-family:var(--font-display); font-weight:900; font-size:13px; color:#fff}
-  .face.on{box-shadow:0 0 0 2px #fff}
+  .face.on{box-shadow:0 0 0 2px var(--ink)}
   .app-main{flex:1; min-width:0; display:flex; flex-direction:column}
-  .tabs{height:44px; flex:none; background:#11131a; display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
+  .tabs{height:44px; flex:none; background:#0e1014; border-bottom:var(--rule-soft); display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
   .tab{font-size:12px; color:#8d939c; padding:6px 12px; font-family:var(--font-body)}
-  .tab.on{background:#fff; color:#11131a; font-weight:500}
-  .mail{flex:1; padding:var(--s5); display:flex; flex-direction:column; gap:var(--s3)}
+  .tab.on{background:var(--ink); color:#0b0d0f; font-weight:500}
+  .mail{flex:1; background:var(--screen); padding:var(--s5); display:flex; flex-direction:column; gap:var(--s3)}
   .line{height:9px; background:#e6e8eb}
   .line.dark{background:#c9ccd1}
   figcaption{margin-top:var(--s4); display:flex; gap:var(--s6); flex-wrap:wrap}
@@ -81,7 +82,7 @@
   .fact:last-child{border-bottom:0}
   .fact p{margin:0; max-width:52ch}
   .fact .n{font-family:var(--font-mono); font-size:40px; line-height:1; letter-spacing:-.02em}
-  .fact .n.accent{color:var(--accent)}
+  .fact .n.accent{color:var(--accent-lift)}
   .fact .unit{font-size:14px}
 
   /* Install */

@@ -32,16 +32,25 @@ Deliberately not Inter, which is the default and reads as templated.
 
 ## Colour roles
 
-Three inks and one accent. No second accent, no gradient. Cool grey ground, never cream,
-and no warm accent, so it carries no resemblance to any other brand.
+One ground, two text weights, one accent in two brightnesses. No gradient. A cool near-black
+ground and a blue accent, never cream and never a warm accent, so it carries no resemblance
+to any other brand.
+
+The page is dark, and only dark. One committed look rather than a theme that has to
+work twice, which matches the app: its own chrome is dark too.
 
 | Token | Value | Role |
 |---|---|---|
-| `--ink` | `#0b0d0f` | text, rules, the dark figure |
-| `--ink-soft` | `#5b6169` | secondary text, labels |
-| `--paper` | `#f1f2f4` | page ground |
-| `--paper-lift` | `#ffffff` | the one raised surface (the figure) |
-| `--accent` | `#1b4dff` | one accent: the download, one numeral, the active tab |
+| `--paper` | `#0b0d0f` | page ground |
+| `--ink` | `#f1f2f4` | primary text |
+| `--ink-soft` | `#8a9099` | secondary text, labels, captions. 7:1 on the ground |
+| `--surface` | `#14171b` | the one raised surface (the figure's frame) |
+| `--screen` | `#ffffff` | the figure's content pane, because Gmail really is white |
+| `--accent` | `#2b5bff` | fills only: the download button |
+| `--accent-lift` | `#7d9cff` | the accent as text, which `--accent` is too dim to be on this ground |
+
+Two accent tokens rather than one, because a blue that works as a button fill is
+unreadable as 40px type on near-black. Both are the same hue.
 
 ## Spacing
 
@@ -52,8 +61,8 @@ and no warm accent, so it carries no resemblance to any other brand.
 
 | Token | Value |
 |---|---|
-| `--rule` | `1px solid #0b0d0f` (hairline, full-bleed section dividers) |
-| `--rule-soft` | `1px solid #d3d6da` |
+| `--rule` | `1px solid #2a2f36` (hairline, full-bleed section dividers) |
+| `--rule-soft` | `1px solid #1c2027` |
 | `--radius` | `0` everywhere except the account circles, which are `50%` |
 | `--ease` | `cubic-bezier(.22,1,.36,1)` |
 | `--dur` | `160ms` |
