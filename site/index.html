@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Masse</title>
+<meta name="description" content="Every Gmail, Calendar and Drive you own, in one window. 1.2 MB, for macOS." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;900&family=Space+Grotesk:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* Tokens. See DESIGN_SYSTEM.md. Nothing below invents a value. */
+  :root{
+    --font-display:'Archivo',system-ui,sans-serif;
+    --font-body:'Space Grotesk',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,monospace;
+    --ink:#0b0d0f; --ink-soft:#5b6169; --paper:#f1f2f4; --paper-lift:#fff; --accent:#1b4dff;
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:72px; --s9:112px;
+    --rule:1px solid var(--ink); --rule-soft:1px solid #d3d6da;
+    --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--font-body); font-size:16px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:0 var(--s5)}
+  .micro{font-family:var(--font-mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-soft)}
+  .fig{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+
+  /* Header */
+  header{border-bottom:var(--rule)}
+  header .wrap{display:flex; align-items:baseline; justify-content:space-between; padding-top:var(--s4); padding-bottom:var(--s4)}
+  .brand{font-family:var(--font-display); font-weight:900; letter-spacing:-.03em; font-size:19px}
+
+  /* Hero */
+  .hero{padding:var(--s9) 0 var(--s8)}
+  h1{
+    font-family:var(--font-display); font-weight:900;
+    font-size:clamp(44px,9vw,122px); line-height:.88; letter-spacing:-.035em;
+    margin:0; max-width:15ch;
+  }
+  .lead{
+    font-size:clamp(17px,2vw,21px); line-height:1.5; color:var(--ink-soft);
+    margin:var(--s6) 0 0; max-width:34ch;
+  }
+  .cta-row{display:flex; align-items:center; gap:var(--s5); flex-wrap:wrap; margin-top:var(--s7)}
+  .cta{
+    display:inline-block; background:var(--accent); color:#fff; text-decoration:none;
+    font-family:var(--font-display); font-weight:900; letter-spacing:-.01em;
+    font-size:17px; padding:var(--s4) var(--s6);
+    transition:transform var(--dur) var(--ease);
+  }
+  .cta:hover{transform:translateY(-2px)}
+
+  /* The one figure: a replica of the app's own chrome */
+  figure{margin:0; border-top:var(--rule); padding:var(--s8) 0}
+  .app{border:var(--rule); background:var(--paper-lift); display:flex; height:340px; overflow:hidden}
+  .rail{
+    width:64px; flex:none; background:#11131a; display:flex; flex-direction:column;
+    align-items:center; gap:14px; padding:var(--s3) 0;
+  }
+  .face{width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
+        font-family:var(--font-display); font-weight:900; font-size:13px; color:#fff}
+  .face.on{box-shadow:0 0 0 2px #fff}
+  .app-main{flex:1; min-width:0; display:flex; flex-direction:column}
+  .tabs{height:44px; flex:none; background:#11131a; display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
+  .tab{font-size:12px; color:#8d939c; padding:6px 12px; font-family:var(--font-body)}
+  .tab.on{background:#fff; color:#11131a; font-weight:500}
+  .mail{flex:1; padding:var(--s5); display:flex; flex-direction:column; gap:var(--s3)}
+  .line{height:9px; background:#e6e8eb}
+  .line.dark{background:#c9ccd1}
+  figcaption{margin-top:var(--s4); display:flex; gap:var(--s6); flex-wrap:wrap}
+
+  /* Facts: a rules-separated list, deliberately uneven, no cards */
+  .facts{border-top:var(--rule)}
+  .fact{display:grid; grid-template-columns:minmax(0,7ch) minmax(0,1fr); gap:var(--s6);
+        padding:var(--s6) 0; border-bottom:var(--rule-soft); align-items:start}
+  .fact:last-child{border-bottom:0}
+  .fact p{margin:0; max-width:52ch}
+  .fact .n{font-family:var(--font-mono); font-size:40px; line-height:1; letter-spacing:-.02em}
+  .fact .n.accent{color:var(--accent)}
+  .fact .unit{font-size:14px}
+
+  /* Install */
+  .install{border-top:var(--rule); padding:var(--s8) 0}
+  .steps{list-style:none; margin:var(--s5) 0 0; padding:0; display:grid; gap:var(--s3); max-width:60ch}
+  .steps li{display:flex; gap:var(--s5)}
+  .steps span{font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); flex:none; padding-top:3px}
+
+  footer{border-top:var(--rule); padding:var(--s5) 0 var(--s7)}
+  footer .wrap{display:flex; justify-content:space-between; gap:var(--s5); flex-wrap:wrap}
+
+  @media (max-width:760px){
+    .fact{grid-template-columns:1fr; gap:var(--s3)}
+    .app{height:260px}
+    .rail{width:52px}
+    .face{width:30px; height:30px; font-size:11px}
+  }
+  @media (prefers-reduced-motion:reduce){ .cta{transition:none} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="brand">Masse</span>
+    <span class="micro fig">0.9.5 / macOS</span>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <h1>Every Gmail, Calendar and Drive you own. One window.</h1>
+      <p class="lead">No logging in and out. No wondering which account you are in.</p>
+      <div class="cta-row">
+        <a class="cta" href="Masse.zip" download>Download for macOS</a>
+        <span class="micro fig">1.2 MB &nbsp;/&nbsp; macOS 11 or later &nbsp;/&nbsp; Apple silicon</span>
+      </div>
+    </div>
+  </section>
+
+  <figure>
+    <div class="wrap">
+      <div class="app">
+        <div class="rail">
+          <span class="face on" style="background:#6366f1">JV</span>
+          <span class="face" style="background:#ec4899">AE</span>
+          <span class="face" style="background:#f59e0b">S</span>
+        </div>
+        <div class="app-main">
+          <div class="tabs">
+            <span class="tab on">Mail</span>
+            <span class="tab">Calendar</span>
+            <span class="tab">Drive</span>
+          </div>
+          <div class="mail">
+            <div class="line dark" style="width:54%"></div>
+            <div class="line" style="width:78%"></div>
+            <div class="line" style="width:41%"></div>
+            <div class="line" style="width:66%"></div>
+            <div class="line" style="width:88%"></div>
+            <div class="line" style="width:35%"></div>
+          </div>
+        </div>
+      </div>
+      <figcaption>
+        <span class="micro">Accounts on the left</span>
+        <span class="micro">Apps across the top</span>
+        <span class="micro">Neither one moves the other</span>
+      </figcaption>
+    </div>
+  </figure>
+
+  <section class="facts">
+    <div class="wrap">
+      <div class="fact">
+        <span class="n accent">1.2<span class="unit">MB</span></span>
+        <p>It borrows the browser engine already in macOS instead of bringing its own, so the
+           whole app is smaller than a photograph.</p>
+      </div>
+      <div class="fact">
+        <span class="n">520<span class="unit">MB</span></span>
+        <p>What one open account costs. Leave an account alone and Masse closes it, and that
+           memory goes back to your machine. You set how many stay open and for how long.</p>
+      </div>
+      <div class="fact">
+        <span class="n">&#8984;2</span>
+        <p>Second account. Command and a number moves between accounts, command shift and a
+           number moves between Mail, Calendar and Drive.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="install">
+    <div class="wrap">
+      <span class="micro">Setup</span>
+      <ol class="steps">
+        <li><span>01</span> Move Masse to your Applications folder.</li>
+        <li><span>02</span> Sign in to each account once, with Google's own sign in page.</li>
+        <li><span>03</span> That is the whole setup.</li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="micro">Links open in the browser you already use</span>
+    <span class="micro fig">Masse 0.9.5</span>
+  </div>
+</footer>
+
+</body>
+</html>
