@@ -272,18 +272,36 @@ pub fn settings_html(state: &str) -> String {
   .promo {{
     position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
     display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
-    padding: 11px 20px; border-radius: 999px;
-    background: rgba(32,36,44,.92);
-    box-shadow: 0 8px 28px -6px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.13);
+    padding: 11px 20px; border-radius: 999px; position: fixed;
+    /* Sheen: a cool tint under a top-down highlight, so it catches light along its
+       upper edge the way a physical pill would. The inset white line is the
+       highlight; the inset dark line at the bottom is the shaded underside. */
+    background:
+      linear-gradient(180deg, rgba(120,150,255,.20), rgba(70,90,190,.10) 46%, rgba(24,27,34,.72)),
+      rgba(30,34,42,.92);
+    box-shadow:
+      0 8px 28px -6px rgba(0,0,0,.6),
+      0 2px 22px -4px rgba(43,91,255,.42),
+      inset 0 1px 0 rgba(255,255,255,.26),
+      inset 0 -1px 0 rgba(0,0,0,.34),
+      0 0 0 1px rgba(140,165,255,.24);
     backdrop-filter: blur(10px);
     font-size: 12.5px; color: rgba(255,255,255,.72); cursor: pointer;
     transition: transform .16s cubic-bezier(.22,1,.36,1), background .12s ease,
                 color .12s ease, box-shadow .16s ease;
   }}
   .promo:hover {{
-    background: rgba(44,49,59,.96); color: #fff;
+    color: #fff;
+    background:
+      linear-gradient(180deg, rgba(140,170,255,.30), rgba(80,105,215,.14) 46%, rgba(28,32,40,.74)),
+      rgba(34,39,48,.94);
     transform: translateX(-50%) translateY(-2px);
-    box-shadow: 0 12px 34px -6px rgba(0,0,0,.68), 0 0 0 1px rgba(255,255,255,.22);
+    box-shadow:
+      0 12px 34px -6px rgba(0,0,0,.68),
+      0 3px 30px -4px rgba(43,91,255,.60),
+      inset 0 1px 0 rgba(255,255,255,.34),
+      inset 0 -1px 0 rgba(0,0,0,.34),
+      0 0 0 1px rgba(160,185,255,.38);
   }}
   .promo:active {{ transform: translateX(-50%) translateY(0); }}
   .promo svg {{ width: 13px; height: 13px; opacity: .75; }}
