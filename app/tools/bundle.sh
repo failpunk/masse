@@ -1,5 +1,5 @@
 #!/bin/bash
-# Packages the release binary as Shim.app.
+# Packages the release binary as Masse.app.
 #
 # The bundle identifier matters more than it looks: WKWebView derives its
 # persistent data store from app identity, so changing CFBundleIdentifier makes
@@ -7,17 +7,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BUNDLE_ID="com.failpunk.shim"
-APP="target/Shim.app"
+BUNDLE_ID="com.failpunk.masse"
+APP="target/Masse.app"
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+
+# Quit a running copy politely first. WebKit flushes its cookie jar on clean
+# shutdown and drops it on a hard kill, so `pkill` here would silently sign the
+# user out of every Google account on every rebuild.
+if pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1 || pgrep -x masse >/dev/null 2>&1; then
+  osascript -e 'tell application "Masse" to quit' >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -x masse >/dev/null 2>&1 || break
+    sleep 1
+  done
+  pgrep -x masse >/dev/null 2>&1 && echo "[bundle] WARNING: Masse would not quit; not force-killing (cookies would be lost)"
+fi
 
 cargo build --release
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/shim "$APP/Contents/MacOS/shim"
+cp target/release/masse "$APP/Contents/MacOS/masse"
 
 # Icon: reuse the PNG generator, upscaled to the sizes iconutil wants.
-ICONSET=$(mktemp -d)/Shim.iconset
+ICONSET=$(mktemp -d)/Masse.iconset
 mkdir -p "$ICONSET"
 ICON_OUT="$ICONSET" node ../tools/make-icons.mjs 16 32 64 128 256 512 1024 >/dev/null
 for sz in 16 32 128 256 512; do
@@ -28,18 +40,18 @@ mv "$ICONSET/icon64.png"   "$ICONSET/icon_32x32@2x.png"   2>/dev/null || true
 mv "$ICONSET/icon1024.png" "$ICONSET/icon_512x512@2x.png" 2>/dev/null || true
 cp "$ICONSET/icon_256x256.png" "$ICONSET/icon_128x128@2x.png"
 cp "$ICONSET/icon_512x512.png" "$ICONSET/icon_256x256@2x.png"
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Shim.icns"
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Masse.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Shim</string>
-  <key>CFBundleDisplayName</key><string>Shim</string>
+  <key>CFBundleName</key><string>Masse</string>
+  <key>CFBundleDisplayName</key><string>Masse</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-  <key>CFBundleExecutable</key><string>shim</string>
-  <key>CFBundleIconFile</key><string>Shim</string>
+  <key>CFBundleExecutable</key><string>masse</string>
+  <key>CFBundleIconFile</key><string>Masse</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

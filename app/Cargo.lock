@@ -1161,6 +1161,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "masse"
+version = "0.7.0"
+dependencies = [
+ "muda",
+ "serde",
+ "serde_json",
+ "tao",
+ "wry",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1850,17 +1861,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
-]
-
-[[package]]
-name = "shim"
-version = "0.6.0"
-dependencies = [
- "muda",
- "serde",
- "serde_json",
- "tao",
- "wry",
 ]
 
 [[package]]

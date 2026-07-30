@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+- Renamed to Masse throughout. Session store migrated, so accounts carry over.
+- Settings modal behind the gear: logo, version, remove an account, memory dials.
+- Rebuilds now quit the app cleanly instead of killing it, which was discarding
+  the cookie jar and forcing a fresh login every time.
+
 ## 0.6.0
 - Logins survive a restart. Switched to `WKWebsiteDataStore(forIdentifier:)`; the
   default store was keeping cookies in memory only, so every launch demanded

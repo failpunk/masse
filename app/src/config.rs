@@ -75,7 +75,7 @@ impl Config {
     /// and edited by hand, so it lives where you would go looking for it.
     pub fn path() -> PathBuf {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-        home.join(".config").join("shim").join("accounts.json")
+        home.join(".config").join("masse").join("accounts.json")
     }
 
     pub fn load() -> Config {
@@ -86,8 +86,8 @@ impl Config {
                 Ok(parsed) => Some(parsed),
                 Err(err) => {
                     // Never silently discard someone's account list.
-                    eprintln!("[shim] {} is not valid JSON: {err}", path.display());
-                    eprintln!("[shim] refusing to overwrite it; fix or delete the file");
+                    eprintln!("[masse] {} is not valid JSON: {err}", path.display());
+                    eprintln!("[masse] refusing to overwrite it; fix or delete the file");
                     std::process::exit(1);
                 }
             })
@@ -101,7 +101,7 @@ impl Config {
                 avatar: None,
             }];
             config.save();
-            eprintln!("[shim] wrote a starter config to {}", path.display());
+            eprintln!("[masse] wrote a starter config to {}", path.display());
         }
 
         for (i, account) in config.accounts.iter_mut().enumerate() {
@@ -121,10 +121,10 @@ impl Config {
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
                 if let Err(err) = fs::write(&path, json + "\n") {
-                    eprintln!("[shim] could not write {}: {err}", path.display());
+                    eprintln!("[masse] could not write {}: {err}", path.display());
                 }
             }
-            Err(err) => eprintln!("[shim] could not serialise config: {err}"),
+            Err(err) => eprintln!("[masse] could not serialise config: {err}"),
         }
     }
 

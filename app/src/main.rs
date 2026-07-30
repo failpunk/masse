@@ -1,4 +1,4 @@
-// Shim: one window, several Google accounts, a small resident footprint.
+// Masse: one window, several Google accounts, a small resident footprint.
 //
 // The whole memory argument rests on one thing: panes you are not looking at get
 // destroyed, not hidden. Dropping a wry WebView tears down its WKWebView content
@@ -58,6 +58,10 @@ enum Msg {
     Avatar { email: String, src: String },
     /// Open Google's add-account flow.
     AddAccount,
+    OpenSettings,
+    CloseSettings,
+    Remove { email: String },
+    Dials { max_live: usize, idle_minutes: u64 },
     OpenConfig,
 }
 
@@ -66,6 +70,8 @@ struct App {
     panes: HashMap<String, WebView>,
     lru: Lru,
     active: String,
+    /// The settings modal, alive only while it is open.
+    settings: Option<WebView>,
     /// Panes already sent to the login page once. Without this, a login that
     /// keeps failing would bounce the pane round in circles.
     rescued: std::collections::HashSet<String>,
@@ -77,6 +83,21 @@ fn key_of(email: &str, service: &str) -> String {
 
 fn main() -> wry::Result<()> {
     let config = Config::load();
+
+    // Dump a chrome surface to stdout so its look can be checked in a browser
+    // without launching the app. Debug aid only.
+    if let Some(which) = std::env::args().nth(1).filter(|a| a.starts_with("--dump-")) {
+        let state = rail_state(&config, &key_of(&config.accounts[0].email, "mail"));
+        print!(
+            "{}",
+            match which.trim_start_matches("--dump-") {
+                "rail" => ui::rail_html(&state),
+                "topbar" => ui::topbar_html(&state),
+                _ => ui::settings_html(&state),
+            }
+        );
+        return Ok(());
+    }
     let first = config.accounts[0].clone();
 
     // Without a real Edit menu macOS never routes Cmd+C/V/X or Cmd+A into a
@@ -87,7 +108,7 @@ fn main() -> wry::Result<()> {
     let proxy = event_loop.create_proxy();
 
     let window = WindowBuilder::new()
-        .with_title("Shim")
+        .with_title("Masse")
         .with_inner_size(LogicalSize::new(1340.0, 900.0))
         .with_min_inner_size(LogicalSize::new(680.0, 480.0))
         .build(&event_loop)
@@ -138,6 +159,7 @@ fn main() -> wry::Result<()> {
         active: key_of(&first.email, "mail"),
         config,
         panes: HashMap::new(),
+        settings: None,
         rescued: std::collections::HashSet::new(),
     }));
 
@@ -162,7 +184,7 @@ fn main() -> wry::Result<()> {
                     let key = key_of(&email, &service);
                     let mut state = app.borrow_mut();
                     if state.rescued.insert(key.clone()) {
-                        println!("[shim] {email} {service} bounced to a signed-out page, going to login");
+                        println!("[masse] {email} {service} bounced to a signed-out page, going to login");
                         if let Some(view) = state.panes.get(&key) {
                             let _ = view.load_url(&signin_url(&email, &service));
                         }
@@ -179,7 +201,7 @@ fn main() -> wry::Result<()> {
                     let index = app.config.accounts.len();
                     app.config.accounts.push(Account::discovered(&wanted, index));
                     app.config.save();
-                    println!("[shim] added account {wanted}");
+                    println!("[masse] added account {wanted}");
                 }
                 let changed = app
                     .config
@@ -203,10 +225,114 @@ fn main() -> wry::Result<()> {
                 show(&app, &window, &proxy, &chrome, &email, ADD);
             }
 
+            Event::UserEvent(Msg::OpenSettings) => {
+                let mut state = app.borrow_mut();
+                if state.settings.is_none() {
+                    // Hide the pane underneath so the modal is unambiguously on top
+                    // whatever the subview order happens to be.
+                    if let Some(view) = state.panes.get(&state.active) {
+                        let _ = view.set_visible(false);
+                    }
+                    let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+                    let payload = rail_state(&state.config, &state.active);
+                    let modal_proxy = proxy.clone();
+                    match WebViewBuilder::new()
+                        .with_bounds(rect(0.0, 0.0, size.width, size.height))
+                        .with_transparent(true)
+                        .with_html(ui::settings_html(&payload))
+                        .with_ipc_handler(move |req| handle_rail(&modal_proxy, req.body()))
+                        .build_as_child(&window)
+                    {
+                        Ok(view) => state.settings = Some(view),
+                        Err(err) => eprintln!("[masse] could not open settings: {err}"),
+                    }
+                }
+            }
+
+            Event::UserEvent(Msg::CloseSettings) => {
+                let mut state = app.borrow_mut();
+                state.settings = None; // dropping it removes the subview
+                if let Some(view) = state.panes.get(&state.active) {
+                    let _ = view.set_visible(true);
+                    let _ = view.focus();
+                }
+            }
+
+            Event::UserEvent(Msg::Remove { email }) => {
+                let wanted = email.trim().to_lowercase();
+                let mut state = app.borrow_mut();
+                if state.config.accounts.len() <= 1 {
+                    eprintln!("[masse] refusing to remove the last account");
+                } else {
+                    state
+                        .config
+                        .accounts
+                        .retain(|a| a.email.trim().to_lowercase() != wanted);
+                    state.config.save();
+                    // Tear down that account's panes rather than leaving orphans.
+                    let dead: Vec<String> = state
+                        .panes
+                        .keys()
+                        .filter(|k| k.starts_with(&format!("{wanted}\u{1}")))
+                        .cloned()
+                        .collect();
+                    for key in dead {
+                        state.panes.remove(&key);
+                    }
+                    println!("[masse] removed account {wanted}");
+                }
+                let payload = rail_state(&state.config, &state.active);
+                chrome.push(&payload);
+                if let Some(view) = &state.settings {
+                    let _ = view.evaluate_script(&format!("window.shim.render({payload})"));
+                }
+                // If the account we were looking at is gone, go somewhere that exists.
+                let orphaned = !state.active.starts_with(&format!("{wanted}\u{1}"));
+                let fallback = state.config.accounts[0].email.clone();
+                drop(state);
+                if !orphaned {
+                    show(&app, &window, &proxy, &chrome, &fallback, "mail");
+                }
+            }
+
+            Event::UserEvent(Msg::Dials { max_live, idle_minutes }) => {
+                let mut state = app.borrow_mut();
+                state.config.max_live = max_live.max(1);
+                state.config.idle_minutes = idle_minutes;
+                state.config.save();
+                state.lru = Lru::new(state.config.max_live);
+                let active = state.active.clone();
+                // Re-seat the visible pane so it is the freshest entry in the new budget.
+                for evicted in state.lru.touch(&active) {
+                    state.panes.remove(&evicted);
+                }
+                let extra: Vec<String> = state
+                    .panes
+                    .keys()
+                    .filter(|k| **k != active)
+                    .cloned()
+                    .collect();
+                for key in extra.into_iter().take(usize::MAX) {
+                    if state.panes.len() > state.config.max_live {
+                        state.panes.remove(&key);
+                    }
+                }
+                println!("[masse] max_live={max_live} idle_minutes={idle_minutes}");
+            }
+
             Event::UserEvent(Msg::OpenConfig) => {
-                let _ = std::process::Command::new("open")
-                    .arg(Config::path())
-                    .spawn();
+                // -t forces the default *text editor* rather than whatever owns the
+                // .json extension. Without it this opens Xcode on machines where
+                // Xcode has claimed JSON, which is most machines with Xcode.
+                let path = Config::path();
+                let opened = std::process::Command::new("open")
+                    .arg("-t")
+                    .arg(&path)
+                    .spawn()
+                    .is_ok();
+                if !opened {
+                    let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
+                }
             }
 
             Event::WindowEvent {
@@ -221,6 +347,9 @@ fn main() -> wry::Result<()> {
                 let app = app.borrow();
                 if let Some(view) = app.panes.get(&app.active) {
                     let _ = view.set_bounds(content_rect(&window));
+                }
+                if let Some(view) = &app.settings {
+                    let _ = view.set_bounds(rect(0.0, 0.0, size.width, size.height));
                 }
             }
 
@@ -246,7 +375,7 @@ fn reclaim_idle(app: &Rc<RefCell<App>>) {
     for key in state.lru.stale(idle, &active) {
         if state.panes.remove(&key).is_some() {
             println!(
-                "[shim] reclaimed {} after {} idle minutes",
+                "[masse] reclaimed {} after {} idle minutes",
                 key.replace('\u{1}', " "),
                 state.config.idle_minutes
             );
@@ -285,7 +414,7 @@ fn show(
                 state.panes.insert(key.clone(), view);
             }
             Err(err) => {
-                eprintln!("[shim] could not build pane {key}: {err}");
+                eprintln!("[masse] could not build pane {key}: {err}");
                 return;
             }
         }
@@ -293,7 +422,7 @@ fn show(
 
     for evicted in state.lru.touch(&key) {
         state.panes.remove(&evicted);
-        println!("[shim] evicted {}", evicted.replace('\u{1}', " "));
+        println!("[masse] evicted {}", evicted.replace('\u{1}', " "));
     }
 
     for (other, view) in state.panes.iter() {
@@ -318,6 +447,15 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
             service: value["service"].as_str().unwrap_or("mail").to_string(),
         },
         Some("add") => Msg::AddAccount,
+        Some("settings") => Msg::OpenSettings,
+        Some("close") => Msg::CloseSettings,
+        Some("remove") => Msg::Remove {
+            email: value["email"].as_str().unwrap_or_default().to_string(),
+        },
+        Some("dials") => Msg::Dials {
+            max_live: value["max_live"].as_u64().unwrap_or(2) as usize,
+            idle_minutes: value["idle_minutes"].as_u64().unwrap_or(15),
+        },
         Some("config") => Msg::OpenConfig,
         _ => return,
     };
@@ -370,7 +508,7 @@ fn content_rect(window: &Window) -> Rect {
 
 fn install_menu() {
     let menu = Menu::new();
-    let app = Submenu::new("Shim", true);
+    let app = Submenu::new("Masse", true);
     let edit = Submenu::new("Edit", true);
     let _ = app.append_items(&[
         &PredefinedMenuItem::about(None, None),
@@ -418,6 +556,8 @@ fn rail_state(config: &Config, active: &str) -> String {
         "accounts": accounts,
         "services": SERVICES,
         "active": { "email": email, "service": service },
+        "max_live": config.max_live,
+        "idle_minutes": config.idle_minutes,
     })
     .to_string()
 }

@@ -51,6 +51,10 @@ Requires Rust and Xcode command line tools. Nothing else, no npm, no bundler.
 - **The bundle identifier and the session store identifier are load bearing.**
   `com.failpunk.shim` in `bundle.sh` and `SESSION_STORE` in `main.rs` together
   decide where cookies live. Change either and every account is signed out.
+- **Never `kill` this app.** WebKit flushes its cookie jar on clean shutdown and
+  discards it on a hard kill, so `pkill masse` signs you out of every account.
+  Quit with Cmd+Q, or `osascript -e 'tell application "Masse" to quit'`.
+  `bundle.sh` does this for you before replacing the bundle.
 - **Cookies need an explicit data store.** The default `WKWebsiteDataStore` in an
   app without a full signing identity persists LocalStorage and IndexedDB but keeps
   cookies in memory, so every launch was a fresh login. `with_data_store_identifier`

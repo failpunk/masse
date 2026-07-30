@@ -17,6 +17,7 @@ impl Chrome {
 }
 
 pub const RAIL_W: f64 = 72.0;
+
 pub const TOPBAR_H: f64 = 46.0;
 
 const SHARED_CSS: &str = r#"
@@ -191,5 +192,169 @@ pub fn topbar_html(state: &str) -> String {
   }};
   window.shim.render({state});
 </script>"#
+    )
+}
+
+/// The settings modal. Built fresh each time it opens, which is deliberate: wry
+/// child webviews stack in creation order, so creating it on demand is what puts
+/// it above the panes. It is destroyed on close, costing nothing when shut.
+pub fn settings_html(state: &str) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!(
+        r##"<!doctype html>
+<meta charset="utf-8">
+<style>
+  {SHARED_CSS}
+  body {{
+    height: 100vh; display: grid; place-items: center; padding: 28px;
+    background: rgba(8, 9, 13, .78); backdrop-filter: blur(14px);
+  }}
+  .card {{
+    width: 100%; max-width: 520px; max-height: 100%; overflow: auto;
+    background: #16181f; border-radius: 18px; padding: 24px 26px 20px;
+    box-shadow: 0 24px 70px -20px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);
+  }}
+  header {{ display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }}
+  .mark {{ width: 34px; height: 34px; flex: none; }}
+  h1 {{ font-size: 19px; margin: 0; letter-spacing: -.2px; font-weight: 650; }}
+  .ver {{
+    margin-left: auto; font: 500 11.5px/1 ui-monospace, SFMono-Regular, monospace;
+    color: rgba(255,255,255,.45); background: rgba(255,255,255,.07);
+    padding: 5px 8px; border-radius: 6px;
+  }}
+  .sub {{ color: rgba(255,255,255,.45); font-size: 12.5px; margin: 0 0 22px 46px; }}
+  h2 {{
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+    color: rgba(255,255,255,.38); margin: 20px 0 9px;
+  }}
+  .row {{
+    display: flex; align-items: center; gap: 11px; padding: 8px 10px;
+    border-radius: 11px; background: rgba(255,255,255,.04); margin-bottom: 5px;
+  }}
+  .ava {{
+    width: 30px; height: 30px; border-radius: 50%; overflow: hidden; flex: none;
+    display: grid; place-items: center; font: 600 11px/1 system-ui; color: #fff;
+  }}
+  .ava img {{ width: 100%; height: 100%; object-fit: cover; }}
+  .mail {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .kill {{
+    font-size: 11.5px; padding: 5px 10px; border-radius: 7px;
+    color: rgba(255,255,255,.5); background: rgba(255,255,255,.07);
+  }}
+  .kill:hover {{ background: rgba(255,90,90,.22); color: #ffb4b4; }}
+  .kill.arm {{ background: #e5484d; color: #fff; }}
+  .dial {{
+    display: flex; align-items: center; gap: 11px; padding: 9px 10px;
+    border-radius: 11px; background: rgba(255,255,255,.04); margin-bottom: 5px;
+  }}
+  .dial label {{ flex: 1; font-size: 12.5px; }}
+  .dial small {{ display: block; color: rgba(255,255,255,.38); font-size: 11px; margin-top: 2px; }}
+  input {{
+    width: 62px; font: inherit; text-align: center; padding: 5px; border-radius: 7px;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: #fff;
+  }}
+  footer {{ display: flex; align-items: center; gap: 10px; margin-top: 20px; }}
+  .link {{ font-size: 11.5px; color: rgba(255,255,255,.35); text-decoration: underline; }}
+  .link:hover {{ color: #fff; }}
+  .done {{
+    margin-left: auto; padding: 8px 18px; border-radius: 9px;
+    background: #fff; color: #11131a; font-weight: 600; font-size: 13px;
+  }}
+</style>
+<div class="card">
+  <header>
+    <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
+      <rect width="48" height="48" rx="11" fill="#11131a"/>
+      <rect x="8" y="10" width="4" height="28" rx="2" fill="#6366f1"/>
+      <circle cx="30" cy="15.5" r="4.2" fill="#fff"/>
+      <circle cx="30" cy="24" r="4.2" fill="#fff"/>
+      <circle cx="30" cy="32.5" r="4.2" fill="#fff"/>
+    </svg>
+    <h1>Masse</h1>
+    <span class="ver">v{version}</span>
+  </header>
+  <p class="sub">Several Google accounts, one window.</p>
+
+  <h2>Accounts</h2>
+  <div id="accounts"></div>
+
+  <h2>Memory</h2>
+  <div class="dial">
+    <label>Panes kept loaded
+      <small>Fewer means less memory and a reload when you switch back.</small></label>
+    <input id="maxLive" type="number" min="1" max="9">
+  </div>
+  <div class="dial">
+    <label>Close unused panes after
+      <small>Minutes. 0 keeps them loaded forever.</small></label>
+    <input id="idle" type="number" min="0" max="600">
+  </div>
+
+  <footer>
+    <button class="link" id="json">Edit accounts.json</button>
+    <button class="done" id="close">Done</button>
+  </footer>
+</div>
+<script>
+  {SHARED_JS}
+  let armed = null;
+
+  window.shim = {{
+    render(state) {{
+      const list = document.getElementById('accounts');
+      list.textContent = '';
+      for (const a of state.accounts) {{
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const ava = document.createElement('span');
+        ava.className = 'ava';
+        ava.style.background = a.color;
+        if (a.avatar) {{
+          const img = new Image();
+          img.src = a.avatar;
+          img.referrerPolicy = 'no-referrer';
+          ava.appendChild(img);
+        }} else ava.textContent = a.initials;
+        row.appendChild(ava);
+
+        const mail = document.createElement('span');
+        mail.className = 'mail';
+        mail.textContent = a.email;
+        row.appendChild(mail);
+
+        const kill = document.createElement('button');
+        kill.className = 'kill' + (armed === a.email ? ' arm' : '');
+        kill.textContent = armed === a.email ? 'Really remove?' : 'Remove';
+        // Two-step, because a stray click should not silently drop an account.
+        kill.onclick = () => {{
+          if (armed === a.email) {{
+            armed = null;
+            send({{ type: 'remove', email: a.email }});
+          }} else {{
+            armed = a.email;
+            window.shim.render(state);
+          }}
+        }};
+        row.appendChild(kill);
+        list.appendChild(row);
+      }}
+      document.getElementById('maxLive').value = state.max_live;
+      document.getElementById('idle').value = state.idle_minutes;
+    }},
+  }};
+
+  const push = () => send({{
+    type: 'dials',
+    max_live: Number(document.getElementById('maxLive').value) || 1,
+    idle_minutes: Number(document.getElementById('idle').value) || 0,
+  }});
+  document.getElementById('maxLive').onchange = push;
+  document.getElementById('idle').onchange = push;
+  document.getElementById('json').onclick = () => send({{ type: 'config' }});
+  document.getElementById('close').onclick = () => send({{ type: 'close' }});
+  document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') send({{ type: 'close' }}); }});
+  window.shim.render({state});
+</script>"##
     )
 }
