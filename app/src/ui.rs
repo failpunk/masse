@@ -321,13 +321,7 @@ pub fn settings_html(state: &str) -> String {
 </button>
 <div class="card">
   <header>
-    <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
-      <rect width="48" height="48" rx="11" fill="#11131a"/>
-      <rect x="8" y="10" width="4" height="28" rx="2" fill="#6366f1"/>
-      <circle cx="30" cy="15.5" r="4.2" fill="#fff"/>
-      <circle cx="30" cy="24" r="4.2" fill="#fff"/>
-      <circle cx="30" cy="32.5" r="4.2" fill="#fff"/>
-    </svg>
+    <svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="11" fill="#0b0d0f"/><path d="M24.0 24.0 L24.98 10.03 A14.0 14.0 0 0 1 36.58 30.14 Z" fill="#6366f1"/><path d="M24.0 24.0 L35.61 31.83 A14.0 14.0 0 0 1 12.39 31.83 Z" fill="#ec4899"/><path d="M24.0 24.0 L11.42 30.14 A14.0 14.0 0 0 1 23.02 10.03 Z" fill="#f59e0b"/></svg>
     <h1>Masse</h1>
     <span class="ver">v{version}</span>
   </header>

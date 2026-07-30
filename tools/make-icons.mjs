@@ -1,15 +1,21 @@
-// Generates src/icons/icon{16,32,48,128}.png with no dependencies.
-// Motif: a dark rounded square, an accent strip on the left edge (the hot zone),
-// and three stacked dots (the account rail). Run: node tools/make-icons.mjs
+// Generates the app icon PNGs with no dependencies.
+// Mark: a dark rounded square holding one circle split into three wedges, in the
+// account rail's own three colours. Run: node tools/make-icons.mjs
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OUT = process.env.ICON_OUT || join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'icons');
-const BG = [17, 19, 26];
-const ACCENT = [99, 102, 241];
-const DOT = [255, 255, 255];
+// The mark: one circle divided into three wedges, in the same three colours the
+// account rail uses. Meaning: several accounts, one object. Chosen because it
+// survives 16px, where overlapping circles or a wordmark turn to mush.
+const BG = [11, 13, 15];
+const WEDGES = [
+  [99, 102, 241],  // indigo
+  [236, 72, 153],  // pink
+  [245, 158, 11],  // amber
+];
 const SS = 4; // supersample factor, box-downsampled for antialiasing
 
 function icon(size) {
@@ -17,8 +23,10 @@ function icon(size) {
   const hi = new Float32Array(n * n * 4);
   const radius = n * 0.22;
 
-  const dots = [0.3, 0.5, 0.7].map((cy) => ({ x: n * 0.62, y: n * cy, r: n * 0.088 }));
-  const strip = { x0: n * 0.16, x1: n * 0.24, y0: n * 0.2, y1: n * 0.8, r: n * 0.04 };
+  const cx = n / 2;
+  const cy = n / 2;
+  const ring = n * 0.30;          // radius of the mark
+  const gap = n * 0.018;          // dark separation between wedges
 
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
@@ -30,9 +38,19 @@ function icon(size) {
       if (insideRoundRect(px, py, 0, 0, n, n, radius)) {
         color = BG;
         alpha = 1;
-        if (insideRoundRect(px, py, strip.x0, strip.y0, strip.x1, strip.y1, strip.r)) color = ACCENT;
-        for (const d of dots) {
-          if ((px - d.x) ** 2 + (py - d.y) ** 2 <= d.r * d.r) color = DOT;
+        const dx = px - cx;
+        const dy = py - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= ring) {
+          // Angle from straight up, clockwise, so one wedge points at 12 o'clock.
+          let a = Math.atan2(dx, -dy);
+          if (a < 0) a += Math.PI * 2;
+          const third = (Math.PI * 2) / 3;
+          const index = Math.min(2, Math.floor(a / third));
+          // Leave the background showing along each wedge boundary.
+          const offset = a - index * third;
+          const nearEdge = dist * Math.min(offset, third - offset) < gap;
+          if (!nearEdge) color = WEDGES[index];
         }
       }
 

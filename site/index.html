@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Masse</title>
 <meta name="description" content="Every Google Inbox, Calendar, and Drive in a single app. A simple dedicated app for managing your plethora of Google accounts." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20viewBox='0%200%2048%2048'%20aria-hidden='true'%3E%3Crect%20width='48'%20height='48'%20rx='11'%20fill='%230b0d0f'/%3E%3Cpath%20d='M24.0%2024.0%20L24.98%2010.03%20A14.0%2014.0%200%200%201%2036.58%2030.14%20Z'%20fill='%236366f1'/%3E%3Cpath%20d='M24.0%2024.0%20L35.61%2031.83%20A14.0%2014.0%200%200%201%2012.39%2031.83%20Z'%20fill='%23ec4899'/%3E%3Cpath%20d='M24.0%2024.0%20L11.42%2030.14%20A14.0%2014.0%200%200%201%2023.02%2010.03%20Z'%20fill='%23f59e0b'/%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;900&family=Space+Grotesk:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -47,7 +48,9 @@
   /* Header */
   header{border-bottom:var(--rule)}
   header .wrap{display:flex; align-items:baseline; justify-content:space-between; padding-top:var(--s4); padding-bottom:var(--s4)}
-  .brand{font-family:var(--font-display); font-weight:900; letter-spacing:-.03em; font-size:19px}
+  .brand{font-family:var(--font-display); font-weight:900; letter-spacing:-.03em; font-size:19px;
+         display:inline-flex; align-items:center; gap:9px}
+  .brand svg{width:22px; height:22px; flex:none}
 
   /* Hero */
   .hero{padding:var(--s9) 0 var(--s8)}
@@ -168,8 +171,8 @@
 
 <header>
   <div class="wrap">
-    <span class="brand">Masse</span>
-    <span class="micro fig" data-version>0.9.9 / macOS</span>
+    <span class="brand"><svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="11" fill="#0b0d0f"/><path d="M24.0 24.0 L24.98 10.03 A14.0 14.0 0 0 1 36.58 30.14 Z" fill="#6366f1"/><path d="M24.0 24.0 L35.61 31.83 A14.0 14.0 0 0 1 12.39 31.83 Z" fill="#ec4899"/><path d="M24.0 24.0 L11.42 30.14 A14.0 14.0 0 0 1 23.02 10.03 Z" fill="#f59e0b"/></svg>Masse</span>
+    <span class="micro fig" data-version>0.10.0 / macOS</span>
   </div>
 </header>
 
@@ -281,7 +284,7 @@
 <footer>
   <div class="wrap">
     <a class="micro flink" href="https://ae.studio/alignment" target="_blank" rel="noopener">Learn more about our AI research</a>
-    <span class="micro fig" data-version>Masse 0.9.9</span>
+    <span class="micro fig" data-version>Masse 0.10.0</span>
   </div>
 </footer>
 
