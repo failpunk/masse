@@ -19,13 +19,23 @@
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:72px; --s9:112px;
     --rule:1px solid #2a2f36; --rule-soft:1px solid #1c2027;
     --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
+    --grid:rgba(241,242,244,.028); --grid-step:48px; --glow:rgba(43,91,255,.055);
   }
   *,*::before,*::after{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
   body{
-    margin:0; background:var(--paper); color:var(--ink);
+    margin:0; color:var(--ink);
     font-family:var(--font-body); font-size:16px; line-height:1.55;
     -webkit-font-smoothing:antialiased;
+    /* Graph paper at under 3 percent, plus one soft field off the top left. Meant to
+       register as a surface, not as a pattern. Fixed so it does not scroll past. */
+    background-color:var(--paper);
+    background-image:
+      radial-gradient(120vw 80vh at 8% -10%, var(--glow), transparent 60%),
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:100% 100%, 100% var(--grid-step), var(--grid-step) 100%;
+    background-attachment:fixed, fixed, fixed;
   }
   .wrap{max-width:1080px; margin:0 auto; padding:0 var(--s5)}
   .micro{font-family:var(--font-mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-soft)}
@@ -58,7 +68,8 @@
 
   /* The one figure: a replica of the app's own chrome */
   figure{margin:0; border-top:var(--rule); padding:var(--s8) 0}
-  .app{border:var(--rule); background:var(--surface); display:flex; height:340px; overflow:hidden}
+  .app{border:var(--rule); background:var(--surface); display:flex; height:340px; overflow:hidden;
+        position:relative; z-index:1}
   .rail{
     width:64px; flex:none; background:#0e1014; border-right:var(--rule-soft); display:flex; flex-direction:column;
     align-items:center; gap:14px; padding:var(--s3) 0;
@@ -165,8 +176,8 @@
       </div>
       <div class="fact">
         <span class="n">520<span class="unit">MB</span></span>
-        <p>What one open account costs. Leave an account alone and Masse closes it, and that
-           memory goes back to your machine. You set how many stay open and for how long.</p>
+        <p>What one open account costs. Leave an account alone and Masse closes it, and the memory
+           comes back. You set how many stay open and for how long.</p>
       </div>
       <div class="fact">
         <span class="n">&#8984;2</span>
@@ -180,7 +191,7 @@
     <div class="wrap">
       <span class="micro">Setup</span>
       <ol class="steps">
-        <li><span>01</span> Move Masse to your Applications folder.</li>
+        <li><span>01</span> Move Masse to Applications.</li>
         <li><span>02</span> Sign in to each account once, with Google's own sign in page.</li>
         <li><span>03</span> That is the whole setup.</li>
       </ol>
