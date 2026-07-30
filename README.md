@@ -61,6 +61,12 @@ Requires Rust and Xcode command line tools. Nothing else, no npm, no bundler.
 - **The bundle identifier and the session store identifier are load bearing.**
   `com.failpunk.shim` in `bundle.sh` and `SESSION_STORE` in `main.rs` together
   decide where cookies live. Change either and every account is signed out.
+- **Never hold a `RefCell` borrow across an AppKit or WebKit call.** Creating,
+  destroying, focusing or scripting a WebView pumps the macOS run loop, which
+  re-enters the tao event handler. A borrow still live at that moment panics and,
+  with `panic = "abort"`, takes the process down with no message. This crashed the
+  app on Cmd+1 in 0.8.0. Borrows reachable from a re-entrant path use
+  `try_borrow`, and views are built and dropped unborrowed. `--stress` exercises it.
 - **Never `kill` this app.** WebKit flushes its cookie jar on clean shutdown and
   discards it on a hard kill, so `pkill masse` signs you out of every account.
   Quit with Cmd+Q, or `osascript -e 'tell application "Masse" to quit'`.

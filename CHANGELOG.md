@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1
+- Fixed a crash on Cmd+1. A RefCell borrow was held across calls into AppKit and
+  WebKit, which pump the run loop and re-enter the event handler, so the second
+  borrow aborted the process. Borrows reachable from a re-entrant call now yield
+  instead, and WebViews are built and destroyed outside any borrow.
+- Dropped `panic = "abort"`, which turned a diagnosable panic into a bare SIGABRT.
+
 ## 0.8.0
 - **Links never open in a pane.** Outbound links, and Docs/Sheets opened from
   Drive, go to your default browser. Google's own login plumbing and the

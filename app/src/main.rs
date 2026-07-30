@@ -150,6 +150,36 @@ fn main() -> wry::Result<()> {
 
     let chrome = ui::Chrome { rail, topbar };
 
+    // `--stress` fires switches faster than panes can finish building, which is
+    // how the RefCell double-borrow crash reproduces without a keyboard.
+    if std::env::args().any(|a| a == "--stress") {
+        let proxy = event_loop.create_proxy();
+        let plan: Vec<(String, String)> = config
+            .accounts
+            .iter()
+            .flat_map(|a| SERVICES.iter().map(move |s| (a.email.clone(), s.to_string())))
+            .collect();
+        std::thread::spawn(move || {
+            for round in 0..14 {
+                for (email, service) in &plan {
+                    let _ = proxy.send_event(Msg::Show {
+                        email: email.clone(),
+                        service: service.clone(),
+                    });
+                    std::thread::sleep(std::time::Duration::from_millis(90));
+                }
+                if round % 3 == 0 {
+                    let _ = proxy.send_event(Msg::OpenSettings);
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                    let _ = proxy.send_event(Msg::CloseSettings);
+                }
+                let _ = proxy.send_event(Msg::Reload);
+            }
+            println!("[stress] survived");
+            std::process::exit(0);
+        });
+    }
+
     // `--test-links` drives a pane at an outbound URL and reports where it went,
     // which is the only way to know the navigation handler is really wired.
     if std::env::args().any(|a| a == "--test-links") {
@@ -209,8 +239,12 @@ fn main() -> wry::Result<()> {
         // muda delivers menu activations on its own channel, not through tao.
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             let id = event.id().0.clone();
+            let Ok(state) = app.try_borrow() else {
+                // Mid-switch. Drop this activation rather than panicking.
+                eprintln!("[masse] ignoring menu action while busy: {id}");
+                continue;
+            };
             let (email, service) = {
-                let state = app.borrow();
                 let (email, service) = state
                     .active
                     .split_once('\u{1}')
@@ -233,6 +267,7 @@ fn main() -> wry::Result<()> {
                     }
                 }
             };
+            drop(state);
             if let Some(email) = email {
                 let _ = proxy.send_event(Msg::Show { email, service });
             }
@@ -241,7 +276,7 @@ fn main() -> wry::Result<()> {
         match event {
             Event::NewEvents(StartCause::Init) => {
                 let (email, service) = {
-                    let state = app.borrow();
+                    let Ok(state) = app.try_borrow() else { return };
                     match &state.config.last {
                         // Only honour it if that account still exists.
                         Some([email, service]) if state.config.find(email).is_some() => {
@@ -263,7 +298,7 @@ fn main() -> wry::Result<()> {
                     || url.contains("accounts.google.com");
                 if !host_ok {
                     let key = key_of(&email, &service);
-                    let mut state = app.borrow_mut();
+                    let Ok(mut state) = app.try_borrow_mut() else { return };
                     if state.rescued.insert(key.clone()) {
                         println!("[masse] {email} {service} bounced to a signed-out page, going to login");
                         if let Some(view) = state.panes.get(&key) {
@@ -274,7 +309,7 @@ fn main() -> wry::Result<()> {
             }
 
             Event::UserEvent(Msg::Avatar { email, src }) => {
-                let mut app = app.borrow_mut();
+                let Ok(mut app) = app.try_borrow_mut() else { return };
                 // Google serves the header thumbnail at 32px; ask for a retina one.
                 let src = upscale(&src);
                 let wanted = email.trim().to_lowercase();
@@ -302,12 +337,14 @@ fn main() -> wry::Result<()> {
                 // The account is whoever ends up signed in, read off the page
                 // afterwards, so nothing has to be typed and a listed account is
                 // always one that genuinely works.
-                let email = app.borrow().config.accounts[0].email.clone();
+                let Ok(state) = app.try_borrow() else { return };
+                let email = state.config.accounts[0].email.clone();
+                drop(state);
                 show(&app, &window, &proxy, &chrome, &email, ADD);
             }
 
             Event::UserEvent(Msg::OpenSettings) => {
-                let mut state = app.borrow_mut();
+                let Ok(mut state) = app.try_borrow_mut() else { return };
                 if state.settings.is_none() {
                     // Hide the pane underneath so the modal is unambiguously on top
                     // whatever the subview order happens to be.
@@ -316,32 +353,42 @@ fn main() -> wry::Result<()> {
                     }
                     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
                     let payload = rail_state(&state.config, &state.active);
+                    // Build with no borrow held: constructing a WebView re-enters
+                    // AppKit, which can land back in this event loop.
+                    drop(state);
                     let modal_proxy = proxy.clone();
-                    match WebViewBuilder::new()
+                    let built = WebViewBuilder::new()
                         .with_bounds(rect(0.0, 0.0, size.width, size.height))
                         .with_transparent(true)
                         .with_html(ui::settings_html(&payload))
                         .with_ipc_handler(move |req| handle_rail(&modal_proxy, req.body()))
-                        .build_as_child(&window)
-                    {
-                        Ok(view) => state.settings = Some(view),
+                        .build_as_child(&window);
+                    match built {
+                        Ok(view) => {
+                            if let Ok(mut state) = app.try_borrow_mut() {
+                                state.settings = Some(view);
+                            }
+                        }
                         Err(err) => eprintln!("[masse] could not open settings: {err}"),
                     }
                 }
             }
 
             Event::UserEvent(Msg::CloseSettings) => {
-                let mut state = app.borrow_mut();
-                state.settings = None; // dropping it removes the subview
+                let Ok(mut state) = app.try_borrow_mut() else { return };
+                let modal = state.settings.take();
                 if let Some(view) = state.panes.get(&state.active) {
                     let _ = view.set_visible(true);
                     let _ = view.focus();
                 }
+                drop(state);
+                drop(modal); // removes the subview, re-enters AppKit
+
             }
 
             Event::UserEvent(Msg::Remove { email }) => {
                 let wanted = email.trim().to_lowercase();
-                let mut state = app.borrow_mut();
+                let Ok(mut state) = app.try_borrow_mut() else { return };
                 if state.config.accounts.len() <= 1 {
                     eprintln!("[masse] refusing to remove the last account");
                 } else {
@@ -377,7 +424,7 @@ fn main() -> wry::Result<()> {
             }
 
             Event::UserEvent(Msg::Dials { max_live, idle_minutes }) => {
-                let mut state = app.borrow_mut();
+                let Ok(mut state) = app.try_borrow_mut() else { return };
                 state.config.max_live = max_live.max(1);
                 state.config.idle_minutes = idle_minutes;
                 state.config.save();
@@ -409,14 +456,14 @@ fn main() -> wry::Result<()> {
             }
 
             Event::UserEvent(Msg::Drive(url)) => {
-                let state = app.borrow();
+                let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
                     let _ = view.evaluate_script(&format!("location.href = {:?}", url));
                 }
             }
 
             Event::UserEvent(Msg::Reload) => {
-                let state = app.borrow();
+                let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
                     let _ = view.reload();
                 }
@@ -446,7 +493,7 @@ fn main() -> wry::Result<()> {
                 let _ = chrome
                     .topbar
                     .set_bounds(rect(RAIL_W, 0.0, (size.width - RAIL_W).max(1.0), TOPBAR_H));
-                let app = app.borrow();
+                let Ok(app) = app.try_borrow() else { return };
                 if let Some(view) = app.panes.get(&app.active) {
                     let _ = view.set_bounds(content_rect(&window));
                 }
@@ -459,7 +506,7 @@ fn main() -> wry::Result<()> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                let mut state = app.borrow_mut();
+                let Ok(mut state) = app.try_borrow_mut() else { return };
                 let size = window.inner_size().to_logical::<f64>(window.scale_factor());
                 let pos = window
                     .outer_position()
@@ -486,21 +533,29 @@ fn main() -> wry::Result<()> {
 /// Destroy panes nobody has looked at for a while. The visible one is exempt, so
 /// leaving the app open on Gmail all afternoon costs one content process, not three.
 fn reclaim_idle(app: &Rc<RefCell<App>>) {
-    let mut state = app.borrow_mut();
+    // AppKit re-enters this loop from inside menu actions and WebView calls. If a
+    // borrow is already live, skip: the next sweep is 30 seconds away.
+    let Ok(mut state) = app.try_borrow_mut() else {
+        return;
+    };
     if state.config.idle_minutes == 0 {
         return;
     }
     let idle = std::time::Duration::from_secs(state.config.idle_minutes * 60);
     let active = state.active.clone();
+    let minutes = state.config.idle_minutes;
+    let mut doomed = Vec::new();
     for key in state.lru.stale(idle, &active) {
-        if state.panes.remove(&key).is_some() {
+        if let Some(view) = state.panes.remove(&key) {
+            doomed.push(view);
             println!(
-                "[masse] reclaimed {} after {} idle minutes",
-                key.replace('\u{1}', " "),
-                state.config.idle_minutes
+                "[masse] reclaimed {} after {minutes} idle minutes",
+                key.replace('\u{1}', " ")
             );
         }
     }
+    drop(state);
+    drop(doomed);
 }
 
 /// Bring a pane forward, building it on first use and evicting whatever falls off
@@ -587,8 +642,11 @@ fn show(
         }
     }
 
+    let mut doomed = Vec::new();
     for evicted in state.lru.touch(&key) {
-        state.panes.remove(&evicted);
+        if let Some(view) = state.panes.remove(&evicted) {
+            doomed.push(view);
+        }
         println!("[masse] evicted {}", evicted.replace('\u{1}', " "));
     }
 
@@ -602,6 +660,11 @@ fn show(
     state.active = key;
 
     chrome.push(&rail_state(&state.config, &state.active));
+
+    // Released last, and explicitly outside the borrow above, because tearing a
+    // WebView down re-enters AppKit.
+    drop(state);
+    drop(doomed);
 }
 
 fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
