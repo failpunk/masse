@@ -73,13 +73,13 @@ No shadows. A raised surface is expressed with a rule, not a blur.
 
 | Token | Value |
 |---|---|
-| `--grid` | `rgba(241,242,244,.028)` |
+| `--grid` | `rgba(241,242,244,.075)` |
 | `--grid-step` | `48px` |
-| `--glow` | `rgba(43,91,255,.055)` |
+| `--glow` | `rgba(43,91,255,.12)` |
 
-A 48px graph-paper grid at under 3 percent opacity, plus one very soft blue field bled
-off the top left. Both are near the threshold of visibility: they should register as the
-page having a surface, not as a pattern anybody notices. The grid step matches the
+A 48px graph-paper grid at 7.5 percent opacity, plus a soft blue field bled off the top
+left. Readable as ruling if you look for it, still quiet enough that the type stays the
+loudest thing on the page. The grid step matches the
 spacing scale so the ruling lines up with the layout rather than fighting it. No
 gradient across the whole page, no noise image, no second colour.
 

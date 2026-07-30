@@ -19,7 +19,7 @@
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:72px; --s9:112px;
     --rule:1px solid #2a2f36; --rule-soft:1px solid #1c2027;
     --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
-    --grid:rgba(241,242,244,.028); --grid-step:48px; --glow:rgba(43,91,255,.055);
+    --grid:rgba(241,242,244,.075); --grid-step:48px; --glow:rgba(43,91,255,.12);
   }
   *,*::before,*::after{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -27,8 +27,8 @@
     margin:0; color:var(--ink);
     font-family:var(--font-body); font-size:16px; line-height:1.55;
     -webkit-font-smoothing:antialiased;
-    /* Graph paper at under 3 percent, plus one soft field off the top left. Meant to
-       register as a surface, not as a pattern. Fixed so it does not scroll past. */
+    /* Graph paper at 7.5 percent, plus a soft field off the top left. Fixed so it does
+       not scroll past. */
     background-color:var(--paper);
     background-image:
       radial-gradient(120vw 80vh at 8% -10%, var(--glow), transparent 60%),
