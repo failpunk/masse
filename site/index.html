@@ -20,7 +20,9 @@
     --rule:1px solid #2a2f36; --rule-soft:1px solid #1c2027;
     --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
     --grid:rgba(241,242,244,.075); --grid-step:48px; --glow:rgba(43,91,255,.12);
-    --figure-rule:1px solid #3b424b; --figure-halo:rgba(43,91,255,.14); --figure-inset:var(--s5);
+    --figure-rule:1px solid #4a525d; --figure-surface:#1b2027; --figure-rim:rgba(255,255,255,.09);
+    --figure-halo:rgba(43,91,255,.22); --figure-bloom:0 0 140px rgba(43,91,255,.20);
+    --figure-inset:var(--s5); --demo-step:2600ms; --demo-fade:320ms;
   }
   *,*::before,*::after{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -74,27 +76,45 @@
   .app-halo{position:relative; padding:var(--figure-inset)}
   .app-halo::before{
     content:''; position:absolute; inset:0;
-    background:radial-gradient(60% 70% at 50% 40%, var(--figure-halo), transparent 70%);
+    background:radial-gradient(65% 75% at 50% 40%, var(--figure-halo), transparent 70%);
     pointer-events:none;
   }
-  .app{border:var(--figure-rule); background:var(--surface); display:flex; height:400px; overflow:hidden;
-        position:relative; z-index:1}
+  .app{
+    border:var(--figure-rule); background:var(--figure-surface); display:flex;
+    height:400px; overflow:hidden; position:relative; z-index:1;
+    box-shadow:var(--figure-bloom), inset 0 1px 0 var(--figure-rim);
+  }
   .rail{
-    width:64px; flex:none; background:#0e1014; border-right:var(--rule-soft); display:flex; flex-direction:column;
+    width:64px; flex:none; background:#12161b; border-right:1px solid #262c34; display:flex; flex-direction:column;
     align-items:center; gap:14px; padding:var(--s3) 0;
   }
   .face{width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
         font-family:var(--font-display); font-weight:900; font-size:13px; color:#fff;
         opacity:.45; filter:saturate(.65)}
   /* Mirrors the app's selected state, so the figure is not lying about the product. */
-  .face.on{opacity:1; filter:none; box-shadow:0 0 0 3px #0e1014, 0 0 0 5px var(--ink)}
+  .face.on{opacity:1; filter:none; box-shadow:0 0 0 3px #12161b, 0 0 0 5px var(--ink)}
   .app-main{flex:1; min-width:0; display:flex; flex-direction:column}
-  .tabs{height:44px; flex:none; background:#0e1014; border-bottom:var(--rule-soft); display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
+  .tabs{height:44px; flex:none; background:#12161b; border-bottom:1px solid #262c34; display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
   .tab{font-size:12px; color:#8d939c; padding:6px 12px; font-family:var(--font-body)}
   .tab.on{background:var(--ink); color:#0b0d0f; font-weight:500}
-  .mail{flex:1; background:var(--screen); padding:var(--s5); display:flex; flex-direction:column; gap:var(--s3)}
+  .screen{flex:1; background:var(--screen); position:relative; overflow:hidden}
+  .pane{
+    position:absolute; inset:0; padding:var(--s5); opacity:0;
+    transition:opacity var(--demo-fade) var(--ease);
+  }
+  .pane.on{opacity:1}
+  .pane[data-pane="mail"]{display:flex; flex-direction:column; gap:var(--s3)}
   .line{height:9px; background:#e6e8eb}
   .line.dark{background:#c9ccd1}
+  /* Calendar: five day columns with a few event blocks. */
+  .cal{position:relative; height:100%; display:grid; grid-template-columns:repeat(5,1fr); gap:var(--s2)}
+  .cal span{background:#f1f2f4; border-top:2px solid #e0e2e6}
+  .cal i{position:absolute; width:calc(20% - var(--s2)); background:var(--accent); opacity:.75; border-radius:2px}
+  /* Drive: rows of a file square and a name. */
+  .files{display:flex; flex-direction:column; gap:var(--s4)}
+  .files div{display:flex; align-items:center; gap:var(--s3)}
+  .files b{width:18px; height:18px; flex:none; background:#d7dae0}
+  .files span{height:9px; background:#e6e8eb}
   figcaption{margin-top:var(--s4); display:flex; gap:var(--s6); flex-wrap:wrap}
 
   /* Three plain points. No figures, no cards. */
@@ -111,7 +131,8 @@
 
   /* Testimonials. Quiet, so the joke lands without a card around it. */
   .says{border-top:var(--rule); padding:var(--s8) 0; display:grid}
-  .says .wrap{display:grid; gap:var(--s7); grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .says .wrap{display:grid; gap:var(--s7) var(--s7); grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .says-label{grid-column:1/-1; margin-bottom:calc(var(--s7) * -1 + var(--s3))}
   .says blockquote{margin:0}
   .says p{margin:0; font-size:17px; line-height:1.45}
   .says cite{
@@ -175,13 +196,32 @@
             <span class="tab">Calendar</span>
             <span class="tab">Drive</span>
           </div>
-          <div class="mail">
-            <div class="line dark" style="width:54%"></div>
-            <div class="line" style="width:78%"></div>
-            <div class="line" style="width:41%"></div>
-            <div class="line" style="width:66%"></div>
-            <div class="line" style="width:88%"></div>
-            <div class="line" style="width:35%"></div>
+          <div class="screen">
+            <div class="pane on" data-pane="mail">
+              <div class="line dark" style="width:54%"></div>
+              <div class="line" style="width:78%"></div>
+              <div class="line" style="width:41%"></div>
+              <div class="line" style="width:66%"></div>
+              <div class="line" style="width:88%"></div>
+              <div class="line" style="width:35%"></div>
+            </div>
+            <div class="pane" data-pane="calendar">
+              <div class="cal">
+                <span></span><span></span><span></span><span></span><span></span>
+                <i style="grid-column:1; top:14%; height:16%"></i>
+                <i style="grid-column:2; top:38%; height:24%"></i>
+                <i style="grid-column:4; top:22%; height:12%"></i>
+                <i style="grid-column:5; top:56%; height:20%"></i>
+              </div>
+            </div>
+            <div class="pane" data-pane="drive">
+              <div class="files">
+                <div><b></b><span style="width:58%"></span></div>
+                <div><b></b><span style="width:44%"></span></div>
+                <div><b></b><span style="width:71%"></span></div>
+                <div><b></b><span style="width:36%"></span></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -206,6 +246,7 @@
 
   <section class="says">
     <div class="wrap">
+      <span class="micro says-label">Testimonials</span>
       <blockquote>
         <p>Now I can see all of the emails I've been ignoring for so long in one place</p>
         <cite>Justin</cite>
@@ -240,5 +281,29 @@
   </div>
 </footer>
 
+<script>
+  // Steps through account and app the way somebody actually uses it. Illustrative
+  // rather than decorative, which is why it walks a real sequence instead of pulsing.
+  (function () {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var faces = [].slice.call(document.querySelectorAll('.face'));
+    var tabs = [].slice.call(document.querySelectorAll('.tab'));
+    var panes = [].slice.call(document.querySelectorAll('.pane'));
+    if (!faces.length || !tabs.length) return;
+
+    var sequence = [[0,0],[0,1],[1,1],[1,0],[2,2],[2,0],[0,0]];
+    var i = 0;
+    var step = parseInt(getComputedStyle(document.documentElement)
+                 .getPropertyValue('--demo-step'), 10) || 2600;
+
+    setInterval(function () {
+      i = (i + 1) % sequence.length;
+      var account = sequence[i][0], app = sequence[i][1];
+      faces.forEach(function (f, n) { f.classList.toggle('on', n === account); });
+      tabs.forEach(function (t, n) { t.classList.toggle('on', n === app); });
+      panes.forEach(function (p, n) { p.classList.toggle('on', n === app); });
+    }, step);
+  })();
+</script>
 </body>
 </html>

@@ -73,9 +73,24 @@ No shadows. A raised surface is expressed with a rule, not a blur.
 
 | Token | Value |
 |---|---|
-| `--figure-rule` | `1px solid #3b424b` |
-| `--figure-halo` | `rgba(43,91,255,.14)` |
+| `--figure-rule` | `1px solid #4a525d` |
+| `--figure-surface` | `#1b2027` |
+| `--figure-rim` | `rgba(255,255,255,.09)` |
+| `--figure-halo` | `rgba(43,91,255,.22)` |
+| `--figure-bloom` | `0 0 140px rgba(43,91,255,.20)` |
 | `--figure-inset` | `var(--s5)` |
+| `--demo-step` | `2600ms` |
+| `--demo-fade` | `320ms` |
+
+On a near-black ground a drop shadow separates nothing, because there is nothing darker to
+cast onto. Lightness does the separating instead: the figure's surface is lifted well above
+the ground, a one-pixel rim light sits on its top edge, and a wide blue bloom spreads behind
+it. This is the only place the page uses light to lift a surface, so it stays a named
+exception rather than a new pattern.
+
+The figure also runs a slow demonstration loop, stepping through accounts and apps on
+`--demo-step`. Motion here is illustrative, not decorative: it shows the one thing the
+product does. It stops entirely under `prefers-reduced-motion`.
 
 The one figure carries the page, so it gets more presence than anything else: a brighter
 rule than the section dividers, and a contained blue halo bled behind it. The halo is the
