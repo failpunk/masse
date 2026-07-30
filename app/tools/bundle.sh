@@ -65,5 +65,16 @@ PLIST
 # for the app rather than re-prompting for permissions on every rebuild.
 codesign --force --deep --sign - "$APP" 2>/dev/null || echo "[bundle] codesign skipped"
 
+# Install to /Applications. Without this the only copy lives under target/, which
+# any rebuild or `cargo clean` deletes, so the Dock icon and Spotlight entry break.
+# Same bundle id, so the session and cookie jar carry over.
+INSTALLED="/Applications/Masse.app"
+if rsync -a --delete "$APP/" "$INSTALLED/" 2>/dev/null; then
+  codesign --force --deep --sign - "$INSTALLED" 2>/dev/null || true
+  echo "[bundle] installed $INSTALLED"
+else
+  echo "[bundle] WARNING: could not install to $INSTALLED; run it from $APP"
+fi
+
 echo "[bundle] built $APP (v$VERSION, $BUNDLE_ID)"
 du -sh "$APP" | awk '{print "[bundle] size " $1}'

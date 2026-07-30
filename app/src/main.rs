@@ -747,6 +747,10 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         return;
     };
+    if value["type"] == "caps" {
+        println!("[caps] {body}");
+        return;
+    }
     if value["type"] == "page" {
         println!("[page] {body}");
         let _ = proxy.send_event(Msg::Landed {
@@ -985,6 +989,12 @@ window.addEventListener('load', () => {
     return false;
   };
   const heading = document.querySelector('h1, [role=heading]');
+  window.ipc.postMessage(JSON.stringify({
+    type: 'caps',
+    notification: typeof Notification,
+    permission: (typeof Notification !== 'undefined' && Notification.permission) || null,
+    serviceWorker: 'serviceWorker' in navigator,
+  }));
   window.ipc.postMessage(JSON.stringify({
     type: 'page', url: location.href.slice(0, 120), title: document.title,
     heading: heading ? heading.textContent.trim().slice(0, 60) : null,
