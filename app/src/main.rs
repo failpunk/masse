@@ -87,6 +87,19 @@ enum Msg {
     Nav(String),
     /// Set an account's highlight colour.
     Colour { email: String, colour: String },
+    /// A surface wants a tooltip. The anchor is in that surface's coordinates and the
+    /// size was measured by the surface, since only it can measure text.
+    Tip {
+        surface: String,
+        text: String,
+        ax: f64,
+        ay: f64,
+        aw: f64,
+        ah: f64,
+        tw: f64,
+        th: f64,
+    },
+    TipHide,
 }
 
 struct App {
@@ -96,6 +109,11 @@ struct App {
     active: String,
     /// The settings modal, alive only while it is open.
     settings: Option<WebView>,
+    /// The tooltip's own webview, so a tooltip can leave the rail it belongs to.
+    tip: Option<WebView>,
+    /// Geometry or last-location changed and has not been written yet. Writing on
+    /// every pixel of a drag would hammer the disk.
+    dirty: bool,
     /// Panes already sent to the login page once. Without this, a login that
     /// keeps failing would bounce the pane round in circles.
     rescued: std::collections::HashSet<String>,
@@ -136,14 +154,25 @@ fn main() -> wry::Result<()> {
         .with_title("Masse")
         .with_min_inner_size(LogicalSize::new(680.0, 480.0));
     builder = match saved {
-        Some([w, h, ..]) if w >= 680.0 && h >= 480.0 => {
-            builder.with_inner_size(LogicalSize::new(w, h))
+        Some([w, h, ..]) if w >= 400.0 && h >= 300.0 => {
+            builder.with_inner_size(tao::dpi::PhysicalSize::new(w, h))
         }
         _ => builder.with_inner_size(LogicalSize::new(1340.0, 900.0)),
     };
     let window = builder.build(&event_loop).expect("window");
     if let Some([_, _, x, y]) = saved {
-        window.set_outer_position(tao::dpi::LogicalPosition::new(x, y));
+        // A monitor that has since been unplugged would put the window somewhere
+        // invisible, so only restore a position that still lands on a display.
+        let on_screen = window.available_monitors().any(|m| {
+            let (o, sz) = (m.position(), m.size());
+            let (l, t) = (o.x as f64, o.y as f64);
+            x >= l - 8.0 && y >= t - 8.0 && x < l + sz.width as f64 && y < t + sz.height as f64
+        });
+        if on_screen {
+            window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
+        } else {
+            println!("[masse] saved window position is off every display, ignoring it");
+        }
     }
 
     let boot = rail_state(&config, &key_of(&first.email, "mail"));
@@ -286,6 +315,8 @@ fn main() -> wry::Result<()> {
         config,
         panes: HashMap::new(),
         settings: None,
+        tip: None,
+        dirty: false,
         rescued: std::collections::HashSet::new(),
     }));
 
@@ -296,9 +327,17 @@ fn main() -> wry::Result<()> {
 
         *control_flow = ControlFlow::WaitUntil(std::time::Instant::now() + SWEEP);
         reclaim_idle(&app);
+        flush(&app);
 
         match event {
             Event::NewEvents(StartCause::Init) => {
+                // Size the chrome from the real window, not the constants it was
+                // built with.
+                let nav = app.borrow().config.nav.clone();
+                let (rail_r, top_r) = chrome_rects(&window, &nav);
+                let _ = chrome.rail.set_bounds(rail_r);
+                let _ = chrome.topbar.set_bounds(top_r);
+
                 let (email, service) = {
                     let Ok(state) = app.try_borrow() else { return };
                     match &state.config.last {
@@ -581,6 +620,72 @@ fn main() -> wry::Result<()> {
                 }
             }
 
+            Event::UserEvent(Msg::Tip { surface, text, ax, ay, aw, ah, tw, th }) => {
+                let nav = match app.try_borrow() {
+                    Ok(a) => a.config.nav.clone(),
+                    Err(_) => return,
+                };
+                // Translate the anchor out of the surface's space into the window's.
+                let (ox, oy) = match surface.as_str() {
+                    "topbar" => (rail_width(&nav), 0.0),
+                    _ => (0.0, 0.0),
+                };
+                let win = window.inner_size().to_logical::<f64>(window.scale_factor());
+                let (ax, ay) = (ax + ox, ay + oy);
+
+                let mut x = ax + aw + 8.0;
+                let mut y = ay + ah / 2.0 - th / 2.0;
+                if x + tw > win.width - 6.0 {
+                    x = ax - tw - 8.0;
+                }
+                if x < 6.0 {
+                    x = ax + aw / 2.0 - tw / 2.0;
+                    y = ay + ah + 8.0;
+                }
+                let y = y.clamp(6.0, (win.height - th - 6.0).max(6.0));
+                let x = x.clamp(6.0, (win.width - tw - 6.0).max(6.0));
+                let bounds = rect(x, y, tw, th);
+
+                let missing = match app.try_borrow() {
+                    Ok(a) => a.tip.is_none(),
+                    Err(_) => return,
+                };
+                if missing {
+                    match WebViewBuilder::new()
+                        .with_bounds(bounds)
+                        .with_transparent(true)
+                        .with_html(ui::TIP_HTML)
+                        .build_as_child(&window)
+                    {
+                        Ok(view) => {
+                            if let Ok(mut a) = app.try_borrow_mut() {
+                                a.tip = Some(view);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("[masse] could not create the tooltip: {err}");
+                            return;
+                        }
+                    }
+                }
+                if let Ok(a) = app.try_borrow() {
+                    if let Some(view) = &a.tip {
+                        let _ = view.set_bounds(bounds);
+                        let text = serde_json::to_string(&text).unwrap_or_default();
+                        let _ = view.evaluate_script(&format!("window.setTip({text})"));
+                        let _ = view.set_visible(true);
+                    }
+                }
+            }
+
+            Event::UserEvent(Msg::TipHide) => {
+                if let Ok(a) = app.try_borrow() {
+                    if let Some(view) = &a.tip {
+                        let _ = view.set_visible(false);
+                    }
+                }
+            }
+
             Event::UserEvent(Msg::Reload) => {
                 let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
@@ -604,9 +709,15 @@ fn main() -> wry::Result<()> {
             }
 
             Event::WindowEvent {
+                event: WindowEvent::Moved(_),
+                ..
+            } => remember_geometry(&app, &window),
+
+            Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..
             } => {
+                remember_geometry(&app, &window);
                 let nav = match app.try_borrow() {
                     Ok(a) => a.config.nav.clone(),
                     Err(_) => return,
@@ -629,28 +740,68 @@ fn main() -> wry::Result<()> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                let Ok(mut state) = app.try_borrow_mut() else { return };
-                let size = window.inner_size().to_logical::<f64>(window.scale_factor());
-                let pos = window
-                    .outer_position()
-                    .map(|p| p.to_logical::<f64>(window.scale_factor()))
-                    .unwrap_or(tao::dpi::LogicalPosition::new(0.0, 0.0));
-                state.config.window = Some([size.width, size.height, pos.x, pos.y]);
-                let (email, service) = state
-                    .active
-                    .split_once('\u{1}')
-                    .map(|(e, s)| (e.to_string(), s.to_string()))
-                    .unwrap_or_default();
-                if !email.is_empty() && service != ADD {
-                    state.config.last = Some([email, service]);
+                remember_geometry(&app, &window);
+                if let Ok(mut state) = app.try_borrow_mut() {
+                    remember_location(&mut state);
                 }
-                state.config.save();
+                flush(&app);
                 *control_flow = ControlFlow::Exit;
+            }
+
+            // Cmd+Q and a quit AppleEvent both terminate without ever sending
+            // CloseRequested, which is why geometry was never once saved.
+            Event::LoopDestroyed => {
+                remember_geometry(&app, &window);
+                if let Ok(mut state) = app.try_borrow_mut() {
+                    remember_location(&mut state);
+                }
+                flush(&app);
             }
 
             _ => {}
         }
     });
+}
+
+/// Record where the window is, in physical pixels so it survives moving between
+/// monitors with different scale factors.
+fn remember_geometry(app: &Rc<RefCell<App>>, window: &Window) {
+    let Ok(mut state) = app.try_borrow_mut() else { return };
+    let size = window.inner_size();
+    let Ok(pos) = window.outer_position() else { return };
+    let next = [size.width as f64, size.height as f64, pos.x as f64, pos.y as f64];
+    if state.config.window != Some(next) {
+        state.config.window = Some(next);
+        state.dirty = true;
+    }
+}
+
+/// Note which account and app is on screen, for the next launch.
+fn remember_location(state: &mut App) {
+    let (email, service) = state
+        .active
+        .split_once('\u{1}')
+        .map(|(e, s)| (e.to_string(), s.to_string()))
+        .unwrap_or_default();
+    if email.is_empty() || service == ADD {
+        return;
+    }
+    let next = Some([email, service]);
+    if state.config.last != next {
+        state.config.last = next;
+        state.dirty = true;
+    }
+}
+
+/// Write pending changes. Called from the periodic sweep and on the way out, so
+/// nothing depends on one particular exit path firing.
+fn flush(app: &Rc<RefCell<App>>) {
+    let Ok(mut state) = app.try_borrow_mut() else { return };
+    if !state.dirty {
+        return;
+    }
+    state.config.save();
+    state.dirty = false;
 }
 
 /// Destroy panes nobody has looked at for a while. The visible one is exempt, so
@@ -761,6 +912,9 @@ fn show(
         match built {
             Ok(view) => {
                 state.panes.insert(key.clone(), view);
+                // Child webviews stack in creation order, so a pane built now would
+                // sit above the tooltip. Drop it; the next hover rebuilds it on top.
+                state.tip = None;
             }
             Err(err) => {
                 eprintln!("[masse] could not build pane {key}: {err}");
@@ -785,6 +939,7 @@ fn show(
         let _ = view.focus();
     }
     state.active = key;
+    remember_location(&mut state);
 
     chrome.push(&rail_state(&state.config, &state.active));
 
@@ -810,6 +965,20 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
             email: value["email"].as_str().unwrap_or_default().to_string(),
         },
         Some("nav") => Msg::Nav(value["nav"].as_str().unwrap_or_default().to_string()),
+        Some("tip") => {
+            let n = |k: &str| value[k].as_f64().unwrap_or(0.0);
+            Msg::Tip {
+                surface: value["surface"].as_str().unwrap_or_default().to_string(),
+                text: value["text"].as_str().unwrap_or_default().to_string(),
+                ax: n("ax"),
+                ay: n("ay"),
+                aw: n("aw"),
+                ah: n("ah"),
+                tw: n("tw"),
+                th: n("th"),
+            }
+        }
+        Some("tipHide") => Msg::TipHide,
         Some("color") => Msg::Colour {
             email: value["email"].as_str().unwrap_or_default().to_string(),
             colour: value["color"].as_str().unwrap_or_default().to_string(),
