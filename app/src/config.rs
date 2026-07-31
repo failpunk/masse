@@ -82,8 +82,8 @@ pub const PALETTE: [&str; 10] = [
     "#6366f1", // indigo
     "#06b6d4", // cyan
     "#10b981", // green
-    "#eab308", // yellow
-    "#f59e0b", // amber
+    "#facc15", // yellow
+    "#f97316", // orange
     "#ec4899", // pink
     "#ef4444", // red
     "#a855f7", // violet

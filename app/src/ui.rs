@@ -320,8 +320,23 @@ pub fn settings_html(state: &str) -> String {
   }}
   .ava img {{ width: 100%; height: 100%; object-fit: cover; }}
   .mail {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-  /* Ten suggestions rather than a full picker. The tick marks the current colour. */
-  .swatches {{ display: flex; gap: 6px; flex-wrap: wrap; margin: 9px 0 0 41px; }}
+  /* The row shows only the current colour. The ten suggestions live in a popover,
+     so the modal is not a wall of swatches when several accounts are configured. */
+  .chipwrap {{ position: relative; flex: none; display: flex; }}
+  .current {{
+    width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.3), 0 0 0 1px rgba(255,255,255,.14);
+    transition: transform .12s cubic-bezier(.22,1,.36,1);
+  }}
+  .current:hover {{ transform: scale(1.12); }}
+  .current.open {{ box-shadow: inset 0 0 0 1px rgba(0,0,0,.3), 0 0 0 2px #fff; }}
+  .pop {{
+    position: absolute; right: 0; top: calc(100% + 7px); z-index: 5;
+    display: flex; gap: 6px; padding: 9px 10px; border-radius: 12px;
+    background: #22262e;
+    box-shadow: 0 12px 32px -8px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.14);
+  }}
+  .pop.up {{ top: auto; bottom: calc(100% + 7px); }}
   .chip {{
     width: 20px; height: 20px; border-radius: 50%; cursor: pointer; flex: none;
     display: grid; place-items: center;
@@ -331,8 +346,6 @@ pub fn settings_html(state: &str) -> String {
   .chip:hover {{ transform: scale(1.16); }}
   .chip svg {{ width: 12px; height: 12px; opacity: 0; }}
   .chip.on svg {{ opacity: 1; }}
-  .acct {{ padding: 4px 0 2px; border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 7px; }}
-  .acct:last-child {{ border-bottom: 0; margin-bottom: 0; }}
   .kill {{
     font-size: 11.5px; padding: 5px 10px; border-radius: 7px;
     color: rgba(255,255,255,.5); background: rgba(255,255,255,.07);
@@ -464,14 +477,15 @@ pub fn settings_html(state: &str) -> String {
 <script>
   {SHARED_JS}
   let armed = null;
+  let picking = null;
 
+  let LAST = null;
   window.shim = {{
     render(state) {{
+      LAST = state;
       const list = document.getElementById('accounts');
       list.textContent = '';
       for (const a of state.accounts) {{
-        const acct = document.createElement('div');
-        acct.className = 'acct';
         const row = document.createElement('div');
         row.className = 'row';
 
@@ -491,6 +505,47 @@ pub fn settings_html(state: &str) -> String {
         mail.textContent = a.email;
         row.appendChild(mail);
 
+        // Current colour only; the ten suggestions appear when this is clicked.
+        const wrap = document.createElement('div');
+        wrap.className = 'chipwrap';
+        const current = document.createElement('button');
+        current.className = 'current' + (picking === a.email ? ' open' : '');
+        current.style.background = a.color;
+        current.title = `Highlight colour ${{a.color}}`;
+        current.onclick = (e) => {{
+          e.stopPropagation();
+          picking = picking === a.email ? null : a.email;
+          window.shim.render(state);
+        }};
+        wrap.appendChild(current);
+
+        if (picking === a.email) {{
+          const pop = document.createElement('div');
+          pop.className = 'pop';
+          for (const c of state.palette) {{
+            const chip = document.createElement('button');
+            chip.className = 'chip' + (c.toLowerCase() === (a.color || '').toLowerCase() ? ' on' : '');
+            chip.style.background = c;
+            chip.style.color = readable(c);
+            chip.title = c;
+            chip.innerHTML = TICK;
+            chip.onclick = (e) => {{
+              e.stopPropagation();
+              picking = null;
+              send({{ type: 'color', email: a.email, color: c }});
+            }};
+            pop.appendChild(chip);
+          }}
+          wrap.appendChild(pop);
+          // Flip above when there is no room below, since the card scrolls and would
+          // otherwise clip it for the last account.
+          requestAnimationFrame(() => {{
+            const box = pop.getBoundingClientRect();
+            if (box.bottom > window.innerHeight - 8) pop.classList.add('up');
+          }});
+        }}
+        row.appendChild(wrap);
+
         const kill = document.createElement('button');
         kill.className = 'kill' + (armed === a.email ? ' arm' : '');
         kill.textContent = armed === a.email ? 'Really remove?' : 'Remove';
@@ -505,22 +560,7 @@ pub fn settings_html(state: &str) -> String {
           }}
         }};
         row.appendChild(kill);
-        acct.appendChild(row);
-
-        const swatches = document.createElement('div');
-        swatches.className = 'swatches';
-        for (const c of state.palette) {{
-          const chip = document.createElement('button');
-          chip.className = 'chip' + (c.toLowerCase() === (a.color || '').toLowerCase() ? ' on' : '');
-          chip.style.background = c;
-          chip.style.color = readable(c);
-          chip.title = c;
-          chip.innerHTML = TICK;
-          chip.onclick = () => send({{ type: 'color', email: a.email, color: c }});
-          swatches.appendChild(chip);
-        }}
-        acct.appendChild(swatches);
-        list.appendChild(acct);
+        list.appendChild(row);
       }}
       const navToggle = document.getElementById('navtoggle');
       navToggle.checked = state.nav === 'stacked';
@@ -543,7 +583,15 @@ pub fn settings_html(state: &str) -> String {
   // Routed through the host so it lands in the real browser, not in a pane.
   document.getElementById('promo').onclick = () =>
     send({{ type: 'link', url: 'https://ae.studio/alignment' }});
-  document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') send({{ type: 'close' }}); }});
+  document.addEventListener('click', () => {{
+    if (picking !== null) {{ picking = null; window.shim.render(LAST); }}
+  }});
+  document.addEventListener('keydown', (e) => {{
+    if (e.key !== 'Escape') return;
+    // Escape closes the popover first, and only then the modal.
+    if (picking !== null) {{ picking = null; window.shim.render(LAST); return; }}
+    send({{ type: 'close' }});
+  }});
   window.shim.render({state});
 </script>"##
     )
