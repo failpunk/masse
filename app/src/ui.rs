@@ -32,14 +32,21 @@ const SHARED_CSS: &str = r#"
 "#;
 
 const SHARED_JS: &str = r#"
+  // 24px viewBox so the geometry has room to be correct, then scaled down. The
+  // previous set was drawn at 20px and read as mush: a chevron for mail, a bare
+  // triangle for Drive.
   const ICONS = {
-    mail: '<rect x="2.5" y="4.5" width="15" height="11" rx="1.5"/><path d="M3 5.5l7 5 7-5"/>',
-    calendar: '<rect x="3" y="5" width="14" height="12" rx="1.5"/><path d="M3 8.5h14M7 3.5v3M13 3.5v3"/>',
-    drive: '<path d="M10 3.5L17 16H3z"/><path d="M6.5 10.5h7"/>',
+    mail: '<rect x="2.5" y="5" width="19" height="14" rx="2.6"/>'
+        + '<path d="M3.6 7.4l7.5 5.2a1.9 1.9 0 0 0 1.8 0l7.5-5.2"/>',
+    calendar: '<rect x="3" y="5.5" width="18" height="15" rx="2.6"/>'
+        + '<path d="M3 10.4h18"/><path d="M8 3.4v4M16 3.4v4"/>'
+        + '<circle cx="12" cy="15" r="1.5" fill="currentColor" stroke="none"/>',
+    drive: '<path d="M3 8a2 2 0 0 1 2-2h3.7a2 2 0 0 1 1.5.7l1.3 1.4H19a2 2 0 0 1 2 2v7'
+        + 'a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   };
   const LABELS = { mail: 'Mail', calendar: 'Calendar', drive: 'Drive' };
   const send = (m) => window.ipc.postMessage(JSON.stringify(m));
-  const svg = (d) => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor"
+  const svg = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round">${d}</svg>`;
 "#;
 
@@ -76,6 +83,20 @@ pub fn rail_html(state: &str) -> String {
     content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 5px;
     border-radius: 0 4px 4px 0; background: #fff;
   }}
+  /* Stacked mode: the rail is the whole navigation, so it needs room to breathe
+     and to scroll once there are several accounts. */
+  body.stacked {{ padding-top: 10px; gap: 6px; overflow-y: auto; }}
+  body.stacked .slot {{ padding: 8px 0 10px; border-radius: 0 14px 14px 0; }}
+  body.stacked .slot.on {{ background: rgba(255,255,255,.07); }}
+  .apps {{ display: flex; gap: 3px; margin-top: 7px; justify-content: center; }}
+  .app {{
+    width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+    color: rgba(255,255,255,.42); transition: background .12s ease, color .12s ease;
+  }}
+  .app svg {{ width: 15px; height: 15px; }}
+  .app:hover {{ background: rgba(255,255,255,.14); color: #fff; }}
+  .app.on {{ background: #fff; color: #11131a; }}
+
   .gear {{
     margin-top: auto; width: 44px; height: 44px; border-radius: 13px; flex: none;
     display: grid; place-items: center; color: rgba(255,255,255,.55);
@@ -115,12 +136,16 @@ pub fn rail_html(state: &str) -> String {
   {SHARED_JS}
   window.shim = {{
     render(state) {{
+      const stacked = state.nav === 'stacked';
+      document.body.classList.toggle('stacked', stacked);
       const rail = document.getElementById('rail');
       rail.textContent = '';
+
       for (const a of state.accounts) {{
         const here = a.email.toLowerCase() === (state.active.email || '').toLowerCase();
         const slot = document.createElement('div');
         slot.className = 'slot' + (here ? ' on' : '');
+
         const ava = document.createElement('button');
         ava.className = 'ava' + (here ? ' on' : '');
         ava.style.background = a.color;
@@ -134,6 +159,22 @@ pub fn rail_html(state: &str) -> String {
         // Switching account keeps whichever app you are already looking at.
         ava.onclick = () => send({{ type: 'show', email: a.email, service: state.active.service }});
         slot.appendChild(ava);
+
+        // Stacked mode puts every app under its own account, so any of the nine
+        // destinations is one click away without changing account first.
+        if (stacked) {{
+          const apps = document.createElement('div');
+          apps.className = 'apps';
+          for (const svc of state.services) {{
+            const b = document.createElement('button');
+            b.className = 'app' + (here && svc === state.active.service ? ' on' : '');
+            b.title = `${{LABELS[svc]}} ({{a.email}})`.replace('{{a.email}}', a.email);
+            b.innerHTML = svg(ICONS[svc]);
+            b.onclick = () => send({{ type: 'show', email: a.email, service: svc }});
+            apps.appendChild(b);
+          }}
+          slot.appendChild(apps);
+        }}
         rail.appendChild(slot);
       }}
     }},
@@ -257,6 +298,13 @@ pub fn settings_html(state: &str) -> String {
     border-radius: 11px; background: rgba(255,255,255,.04); margin-bottom: 5px;
   }}
   .dial label {{ flex: 1; font-size: 12.5px; }}
+  .seg {{ display: flex; gap: 2px; background: rgba(0,0,0,.3); border-radius: 9px; padding: 2px; }}
+  .seg button {{
+    padding: 6px 11px; border-radius: 7px; font-size: 12px; white-space: nowrap;
+    color: rgba(255,255,255,.55); transition: background .12s ease, color .12s ease;
+  }}
+  .seg button:hover {{ color: #fff; }}
+  .seg button.on {{ background: #fff; color: #11131a; font-weight: 600; }}
   .dial small {{ display: block; color: rgba(255,255,255,.38); font-size: 11px; margin-top: 2px; }}
   input {{
     width: 56px; font: inherit; text-align: center; padding: 5px; border-radius: 7px;
@@ -330,6 +378,16 @@ pub fn settings_html(state: &str) -> String {
   <h2>Accounts</h2>
   <div id="accounts"></div>
 
+  <h2>Navigation</h2>
+  <div class="dial">
+    <label>Layout
+      <small>Where the app switcher lives.</small></label>
+    <div class="seg" id="navseg">
+      <button data-nav="split">Split</button>
+      <button data-nav="stacked">All in the rail</button>
+    </div>
+  </div>
+
   <h2>Memory</h2>
   <div class="dial">
     <label>Panes kept in memory
@@ -390,6 +448,10 @@ pub fn settings_html(state: &str) -> String {
         }};
         row.appendChild(kill);
         list.appendChild(row);
+      }}
+      for (const b of document.querySelectorAll('#navseg button')) {{
+        b.classList.toggle('on', b.dataset.nav === state.nav);
+        b.onclick = () => send({{ type: 'nav', nav: b.dataset.nav }});
       }}
       document.getElementById('maxLive').value = state.max_live;
       document.getElementById('idle').value = state.idle_minutes;

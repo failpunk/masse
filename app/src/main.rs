@@ -24,7 +24,10 @@ use wry::{
     Rect, WebView, WebViewBuilder, WebViewBuilderExtDarwin,
 };
 
-use config::{expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD, SERVICES};
+use config::{
+    expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
+    NAV_STACKED, SERVICES,
+};
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
 
@@ -80,6 +83,8 @@ enum Msg {
     Drive(String),
     /// A menu item fired. Carries muda's item id.
     Menu(String),
+    /// Switch between the split layout and everything-in-the-rail.
+    Nav(String),
 }
 
 struct App {
@@ -156,6 +161,9 @@ fn main() -> wry::Result<()> {
         .build_as_child(&window)?;
 
     let chrome = ui::Chrome { rail, topbar };
+    if config.nav == NAV_STACKED {
+        let _ = chrome.topbar.set_visible(false);
+    }
 
     // `--fire-menu` performs every custom menu item through AppKit, which is the
     // only path that reproduces the dangling-MenuChild crash: a keypress goes
@@ -512,6 +520,35 @@ fn main() -> wry::Result<()> {
                 }
             }
 
+            Event::UserEvent(Msg::Nav(nav)) => {
+                let (payload, visible) = {
+                    let Ok(mut state) = app.try_borrow_mut() else { return };
+                    if state.config.nav == nav {
+                        return;
+                    }
+                    state.config.nav = nav.clone();
+                    state.config.save();
+                    println!("[masse] layout -> {nav}");
+                    (
+                        rail_state(&state.config, &state.active),
+                        state.config.nav != NAV_STACKED,
+                    )
+                };
+                // The top bar has no place in stacked mode, and every pane has to be
+                // re-seated because the content area moved.
+                let (rail_r, top_r) = chrome_rects(&window, &nav);
+                let _ = chrome.rail.set_bounds(rail_r);
+                let _ = chrome.topbar.set_visible(visible);
+                let _ = chrome.topbar.set_bounds(top_r);
+                chrome.push(&payload);
+                let bounds = content_rect(&window, &nav);
+                if let Ok(state) = app.try_borrow() {
+                    for view in state.panes.values() {
+                        let _ = view.set_bounds(bounds);
+                    }
+                }
+            }
+
             Event::UserEvent(Msg::Reload) => {
                 let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
@@ -538,17 +575,21 @@ fn main() -> wry::Result<()> {
                 event: WindowEvent::Resized(_),
                 ..
             } => {
-                let size = window.inner_size().to_logical::<f64>(window.scale_factor());
-                let _ = chrome.rail.set_bounds(rect(0.0, 0.0, RAIL_W, size.height));
-                let _ = chrome
-                    .topbar
-                    .set_bounds(rect(RAIL_W, 0.0, (size.width - RAIL_W).max(1.0), TOPBAR_H));
+                let nav = match app.try_borrow() {
+                    Ok(a) => a.config.nav.clone(),
+                    Err(_) => return,
+                };
+                let (rail_r, top_r) = chrome_rects(&window, &nav);
+                let _ = chrome.rail.set_bounds(rail_r);
+                let _ = chrome.topbar.set_bounds(top_r);
                 let Ok(app) = app.try_borrow() else { return };
                 if let Some(view) = app.panes.get(&app.active) {
-                    let _ = view.set_bounds(content_rect(&window));
+                    let _ = view.set_bounds(content_rect(&window, &nav));
                 }
                 if let Some(view) = &app.settings {
-                    let _ = view.set_bounds(rect(0.0, 0.0, size.width, size.height));
+                    // The modal covers the whole window regardless of layout.
+                    let full = window.inner_size().to_logical::<f64>(window.scale_factor());
+                    let _ = view.set_bounds(rect(0.0, 0.0, full.width, full.height));
                 }
             }
 
@@ -621,7 +662,10 @@ fn show(
 ) {
     SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let key = key_of(email, service);
-    let bounds = content_rect(window);
+    let bounds = {
+        let nav = app.borrow().config.nav.clone();
+        content_rect(window, &nav)
+    };
     let mut state = app.borrow_mut();
 
     if !state.panes.contains_key(&key) {
@@ -733,6 +777,7 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
         Some("remove") => Msg::Remove {
             email: value["email"].as_str().unwrap_or_default().to_string(),
         },
+        Some("nav") => Msg::Nav(value["nav"].as_str().unwrap_or_default().to_string()),
         Some("dials") => Msg::Dials {
             max_live: value["max_live"].as_u64().unwrap_or(2) as usize,
             idle_minutes: value["idle_minutes"].as_u64().unwrap_or(15),
@@ -782,13 +827,35 @@ fn upscale(src: &str) -> String {
     }
 }
 
-fn content_rect(window: &Window) -> Rect {
+/// In stacked mode the rail is the entire navigation, so it gets wider and the top
+/// bar is gone, which means the content pane starts at the very top.
+fn rail_width(nav: &str) -> f64 {
+    if nav == NAV_STACKED {
+        78.0
+    } else {
+        RAIL_W
+    }
+}
+
+fn content_rect(window: &Window, nav: &str) -> Rect {
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+    let left = rail_width(nav);
+    let top = if nav == NAV_STACKED { 0.0 } else { TOPBAR_H };
     rect(
-        RAIL_W,
-        TOPBAR_H,
-        (size.width - RAIL_W).max(1.0),
-        (size.height - TOPBAR_H).max(1.0),
+        left,
+        top,
+        (size.width - left).max(1.0),
+        (size.height - top).max(1.0),
+    )
+}
+
+/// Bounds for the rail and the top bar, given the layout.
+fn chrome_rects(window: &Window, nav: &str) -> (Rect, Rect) {
+    let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+    let left = rail_width(nav);
+    (
+        rect(0.0, 0.0, left, size.height),
+        rect(left, 0.0, (size.width - left).max(1.0), TOPBAR_H),
     )
 }
 
@@ -969,6 +1036,7 @@ fn rail_state(config: &Config, active: &str) -> String {
         "accounts": accounts,
         "services": SERVICES,
         "active": { "email": email, "service": service },
+        "nav": config.nav,
         "max_live": config.max_live,
         "idle_minutes": config.idle_minutes,
     })

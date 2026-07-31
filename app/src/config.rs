@@ -51,6 +51,18 @@ pub struct Config {
     /// Where you were when you quit: email then service.
     #[serde(default)]
     pub last: Option<[String; 2]>,
+    /// "split" puts accounts on the left and apps across the top. "stacked" folds
+    /// everything into the left rail, so every account's three apps are one click
+    /// away without changing account first.
+    #[serde(default = "default_nav")]
+    pub nav: String,
+}
+
+pub const NAV_SPLIT: &str = "split";
+pub const NAV_STACKED: &str = "stacked";
+
+fn default_nav() -> String {
+    NAV_SPLIT.to_string()
 }
 
 fn default_max_live() -> usize {
@@ -73,6 +85,7 @@ impl Default for Config {
             idle_minutes: default_idle_minutes(),
             window: None,
             last: None,
+            nav: default_nav(),
         }
     }
 }
@@ -118,6 +131,12 @@ impl Config {
             }
         }
         config.max_live = config.max_live.max(1);
+        // A hand-edited file should not be able to put the window in a layout that
+        // does not exist.
+        if config.nav != NAV_SPLIT && config.nav != NAV_STACKED {
+            eprintln!("[masse] unknown nav \"{}\", falling back to {NAV_SPLIT}", config.nav);
+            config.nav = default_nav();
+        }
         config
     }
 
@@ -500,6 +519,12 @@ mod tests {
     }
 
     #[test]
+    fn nav_defaults_to_split() {
+        assert_eq!(default_nav(), NAV_SPLIT);
+        assert_ne!(NAV_SPLIT, NAV_STACKED);
+    }
+
+    #[test]
     fn initials_prefer_the_label() {
         assert_eq!(initials(&account("AE Studio", "j@ae.studio")), "AS");
         assert_eq!(initials(&account("Personal", "j@gmail.com")), "P");
@@ -514,6 +539,7 @@ mod tests {
             idle_minutes: 15,
             window: None,
             last: None,
+            nav: default_nav(),
         };
         assert!(config.find(" one@gmail.COM ").is_some());
         assert!(config.find("other@gmail.com").is_none());
