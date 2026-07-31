@@ -85,16 +85,20 @@ pub fn rail_html(state: &str) -> String {
   }}
   /* Stacked mode: the rail is the whole navigation, so it needs room to breathe
      and to scroll once there are several accounts. */
-  body.stacked {{ padding-top: 10px; gap: 6px; overflow-y: auto; }}
-  body.stacked .slot {{ padding: 8px 0 10px; border-radius: 0 14px 14px 0; }}
+  body.stacked {{ padding-top: 12px; gap: 4px; overflow-y: auto; }}
+  body.stacked .slot {{ padding: 9px 0 11px; border-radius: 0 14px 14px 0; }}
   body.stacked .slot.on {{ background: rgba(255,255,255,.07); }}
-  .apps {{ display: flex; gap: 3px; margin-top: 7px; justify-content: center; }}
+  /* The account circle gives up a little size so the three apps can sit under it
+     at a legible size instead of being crammed against it. */
+  body.stacked .ava {{ width: 38px; height: 38px; font-size: 13px; }}
+  body.stacked .slot.on::before {{ top: 6px; bottom: 6px; }}
+  .apps {{ display: flex; gap: 5px; margin-top: 9px; justify-content: center; }}
   .app {{
-    width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
-    color: rgba(255,255,255,.42); transition: background .12s ease, color .12s ease;
+    width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
+    color: rgba(255,255,255,.40); transition: background .12s ease, color .12s ease;
   }}
-  .app svg {{ width: 15px; height: 15px; }}
-  .app:hover {{ background: rgba(255,255,255,.14); color: #fff; }}
+  .app svg {{ width: 14px; height: 14px; }}
+  .app:hover {{ background: rgba(255,255,255,.15); color: #fff; }}
   .app.on {{ background: #fff; color: #11131a; }}
 
   .gear {{
@@ -298,13 +302,23 @@ pub fn settings_html(state: &str) -> String {
     border-radius: 11px; background: rgba(255,255,255,.04); margin-bottom: 5px;
   }}
   .dial label {{ flex: 1; font-size: 12.5px; }}
-  .seg {{ display: flex; gap: 2px; background: rgba(0,0,0,.3); border-radius: 9px; padding: 2px; }}
-  .seg button {{
-    padding: 6px 11px; border-radius: 7px; font-size: 12px; white-space: nowrap;
-    color: rgba(255,255,255,.55); transition: background .12s ease, color .12s ease;
+  /* A switch rather than two buttons: with a segmented control it was not obvious
+     which side was active. */
+  .switch {{ flex: none; cursor: pointer; display: inline-flex; }}
+  .switch input {{ position: absolute; opacity: 0; pointer-events: none; }}
+  .switch span {{
+    width: 44px; height: 26px; border-radius: 999px; position: relative;
+    background: rgba(255,255,255,.13); box-shadow: inset 0 0 0 1px rgba(255,255,255,.10);
+    transition: background .16s ease;
   }}
-  .seg button:hover {{ color: #fff; }}
-  .seg button.on {{ background: #fff; color: #11131a; font-weight: 600; }}
+  .switch span::after {{
+    content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+    border-radius: 50%; background: #fff;
+    transition: transform .16s cubic-bezier(.22,1,.36,1);
+  }}
+  .switch input:checked + span {{ background: #2b5bff; }}
+  .switch input:checked + span::after {{ transform: translateX(18px); }}
+  .switch input:focus-visible + span {{ box-shadow: 0 0 0 2px rgba(255,255,255,.5); }}
   .dial small {{ display: block; color: rgba(255,255,255,.38); font-size: 11px; margin-top: 2px; }}
   input {{
     width: 56px; font: inherit; text-align: center; padding: 5px; border-radius: 7px;
@@ -380,12 +394,9 @@ pub fn settings_html(state: &str) -> String {
 
   <h2>Navigation</h2>
   <div class="dial">
-    <label>Layout
-      <small>Where the app switcher lives.</small></label>
-    <div class="seg" id="navseg">
-      <button data-nav="split">Split</button>
-      <button data-nav="stacked">All in the rail</button>
-    </div>
+    <label for="navtoggle">All navigation in the left rail
+      <small>Mail, Calendar and Drive under each account. Off keeps them along the top.</small></label>
+    <label class="switch"><input type="checkbox" id="navtoggle" /><span></span></label>
   </div>
 
   <h2>Memory</h2>
@@ -449,10 +460,10 @@ pub fn settings_html(state: &str) -> String {
         row.appendChild(kill);
         list.appendChild(row);
       }}
-      for (const b of document.querySelectorAll('#navseg button')) {{
-        b.classList.toggle('on', b.dataset.nav === state.nav);
-        b.onclick = () => send({{ type: 'nav', nav: b.dataset.nav }});
-      }}
+      const navToggle = document.getElementById('navtoggle');
+      navToggle.checked = state.nav === 'stacked';
+      navToggle.onchange = () =>
+        send({{ type: 'nav', nav: navToggle.checked ? 'stacked' : 'split' }});
       document.getElementById('maxLive').value = state.max_live;
       document.getElementById('idle').value = state.idle_minutes;
     }},

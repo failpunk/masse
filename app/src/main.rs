@@ -831,7 +831,8 @@ fn upscale(src: &str) -> String {
 /// bar is gone, which means the content pane starts at the very top.
 fn rail_width(nav: &str) -> f64 {
     if nav == NAV_STACKED {
-        78.0
+        // Three 20px app buttons plus their gaps, with margin either side.
+        80.0
     } else {
         RAIL_W
     }
