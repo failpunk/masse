@@ -85,20 +85,32 @@ pub fn rail_html(state: &str) -> String {
   }}
   /* Stacked mode: the rail is the whole navigation, so it needs room to breathe
      and to scroll once there are several accounts. */
-  body.stacked {{ padding-top: 12px; gap: 4px; overflow-y: auto; }}
-  body.stacked .slot {{ padding: 9px 0 11px; border-radius: 0 14px 14px 0; }}
+  body.stacked {{ padding-top: 12px; gap: 6px; overflow-y: auto; }}
+  /* .slot is a fixed 46px tall in split mode, where it holds only the avatar. In
+     stacked mode it also holds a column of apps, so it must grow: with a fixed
+     height the apps overflowed and landed on top of the next account. */
+  body.stacked .slot {{
+    height: auto; display: flex; flex-direction: column; align-items: center;
+    padding: 9px 0 13px; border-radius: 0 14px 14px 0;
+  }}
   body.stacked .slot.on {{ background: rgba(255,255,255,.07); }}
   /* The account circle gives up a little size so the three apps can sit under it
      at a legible size instead of being crammed against it. */
   body.stacked .ava {{ width: 38px; height: 38px; font-size: 13px; }}
   body.stacked .slot.on::before {{ top: 6px; bottom: 6px; }}
-  .apps {{ display: flex; gap: 5px; margin-top: 9px; justify-content: center; }}
+  /* One column, not a row: three icons side by side in a 60-odd pixel rail sat on
+     top of each other. Each app is its own small circle under the account. */
+  .apps {{
+    display: flex; flex-direction: column; align-items: center;
+    gap: 5px; margin-top: 9px;
+  }}
   .app {{
-    width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
-    color: rgba(255,255,255,.40); transition: background .12s ease, color .12s ease;
+    width: 25px; height: 25px; border-radius: 50%; display: grid; place-items: center;
+    color: rgba(255,255,255,.45); background: rgba(255,255,255,.06);
+    transition: background .12s ease, color .12s ease;
   }}
   .app svg {{ width: 14px; height: 14px; }}
-  .app:hover {{ background: rgba(255,255,255,.15); color: #fff; }}
+  .app:hover {{ background: rgba(255,255,255,.17); color: #fff; }}
   .app.on {{ background: #fff; color: #11131a; }}
 
   .gear {{
