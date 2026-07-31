@@ -26,7 +26,7 @@ use wry::{
 
 use config::{
     expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
-    NAV_STACKED, PALETTE, SERVICES,
+    MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
@@ -145,20 +145,7 @@ fn main() -> wry::Result<()> {
         _ => builder.with_inner_size(LogicalSize::new(1340.0, 900.0)),
     };
     let window = builder.build(&event_loop).expect("window");
-    if let Some([_, _, x, y]) = saved {
-        // A monitor that has since been unplugged would put the window somewhere
-        // invisible, so only restore a position that still lands on a display.
-        let on_screen = window.available_monitors().any(|m| {
-            let (o, sz) = (m.position(), m.size());
-            let (l, t) = (o.x as f64, o.y as f64);
-            x >= l - 8.0 && y >= t - 8.0 && x < l + sz.width as f64 && y < t + sz.height as f64
-        });
-        if on_screen {
-            window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
-        } else {
-            println!("[masse] saved window position is off every display, ignoring it");
-        }
-    }
+    restore_position(&window, saved, config.monitor.as_ref());
 
     let boot = rail_state(&config, &key_of(&first.email, "mail"));
 
@@ -681,6 +668,49 @@ fn main() -> wry::Result<()> {
     });
 }
 
+/// Put the window back where it was, preferring the display it was on.
+///
+/// Absolute coordinates alone are not enough: unplug a monitor or drag it to the
+/// other side in Displays and the same coordinate belongs to a different screen, or
+/// to no screen at all. So the remembered display is matched first, by name and
+/// size, and the window is placed at its old offset within that display.
+fn restore_position(window: &Window, saved: Option<[f64; 4]>, spot: Option<&MonitorSpot>) {
+    let monitors: Vec<_> = window.available_monitors().collect();
+    let contains = |x: f64, y: f64| {
+        monitors.iter().any(|m| {
+            let (o, sz) = (m.position(), m.size());
+            let (l, t) = (o.x as f64, o.y as f64);
+            x >= l - 8.0 && y >= t - 8.0 && x < l + sz.width as f64 && y < t + sz.height as f64
+        })
+    };
+
+    if let Some(spot) = spot {
+        let match_ = monitors.iter().find(|m| {
+            m.name().unwrap_or_default() == spot.name
+                && m.size().width as f64 == spot.w
+                && m.size().height as f64 == spot.h
+        });
+        if let Some(m) = match_ {
+            let o = m.position();
+            let x = o.x as f64 + spot.dx;
+            let y = o.y as f64 + spot.dy;
+            let label = if spot.name.is_empty() { "unnamed display" } else { &spot.name };
+            println!("[masse] restoring onto {label} at +{}, +{}", spot.dx, spot.dy);
+            window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
+            return;
+        }
+        println!("[masse] the display it was last on is gone, falling back");
+    }
+
+    match saved {
+        Some([_, _, x, y]) if contains(x, y) => {
+            window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
+        }
+        Some(_) => println!("[masse] saved position is off every display, ignoring it"),
+        None => {}
+    }
+}
+
 /// Record where the window is, in physical pixels so it survives moving between
 /// monitors with different scale factors.
 fn remember_geometry(app: &Rc<RefCell<App>>, window: &Window) {
@@ -688,8 +718,23 @@ fn remember_geometry(app: &Rc<RefCell<App>>, window: &Window) {
     let size = window.inner_size();
     let Ok(pos) = window.outer_position() else { return };
     let next = [size.width as f64, size.height as f64, pos.x as f64, pos.y as f64];
-    if state.config.window != Some(next) {
+
+    // Also note the display and the offset within it, so rearranging monitors does
+    // not send the window to whichever screen now owns that absolute coordinate.
+    let spot = window.current_monitor().map(|m| {
+        let (o, sz) = (m.position(), m.size());
+        MonitorSpot {
+            name: m.name().unwrap_or_default(),
+            w: sz.width as f64,
+            h: sz.height as f64,
+            dx: pos.x as f64 - o.x as f64,
+            dy: pos.y as f64 - o.y as f64,
+        }
+    });
+
+    if state.config.window != Some(next) || state.config.monitor != spot {
         state.config.window = Some(next);
+        state.config.monitor = spot;
         state.dirty = true;
     }
 }

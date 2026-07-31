@@ -45,9 +45,14 @@ pub struct Config {
     /// back. The pane on screen is exempt. 0 turns the timeout off.
     #[serde(default = "default_idle_minutes")]
     pub idle_minutes: u64,
-    /// Window geometry from last quit: width, height, x, y.
+    /// Window geometry from last quit: width, height, x, y, in physical pixels.
     #[serde(default)]
     pub window: Option<[f64; 4]>,
+    /// Which display the window was on, and where it sat within that display.
+    /// Absolute coordinates alone break when displays are rearranged, because the
+    /// same coordinate then belongs to a different screen.
+    #[serde(default)]
+    pub monitor: Option<MonitorSpot>,
     /// Where you were when you quit: email then service.
     #[serde(default)]
     pub last: Option<[String; 2]>,
@@ -56,6 +61,21 @@ pub struct Config {
     /// away without changing account first.
     #[serde(default = "default_nav")]
     pub nav: String,
+}
+
+/// A remembered display, identified well enough to recognise it again after a
+/// rearrangement, plus the window's offset inside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MonitorSpot {
+    /// The display's name, as macOS reports it. Absent on some virtual displays.
+    #[serde(default)]
+    pub name: String,
+    /// Its pixel size, used to tell two same-named displays apart.
+    pub w: f64,
+    pub h: f64,
+    /// The window's position relative to this display's top left.
+    pub dx: f64,
+    pub dy: f64,
 }
 
 pub const NAV_SPLIT: &str = "split";
@@ -103,6 +123,7 @@ impl Default for Config {
             max_live: default_max_live(),
             idle_minutes: default_idle_minutes(),
             window: None,
+            monitor: None,
             last: None,
             nav: default_nav(),
         }
@@ -574,6 +595,7 @@ mod tests {
             max_live: 2,
             idle_minutes: 15,
             window: None,
+            monitor: None,
             last: None,
             nav: default_nav(),
         };
