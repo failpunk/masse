@@ -73,9 +73,28 @@ fn default_idle_minutes() -> u64 {
     15
 }
 
-pub const PALETTE: [&str; 8] = [
-    "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#06b6d4", "#a855f7", "#ef4444", "#84cc16",
+/// Ten suggestions rather than a full colour picker: enough to tell several accounts
+/// apart at a glance, few enough to pick from without deliberating. Ordered
+/// neutral-first so the greys read as the quiet default.
+pub const PALETTE: [&str; 10] = [
+    "#9aa4b2", // grey
+    "#64748b", // slate
+    "#6366f1", // indigo
+    "#06b6d4", // cyan
+    "#10b981", // green
+    "#eab308", // yellow
+    "#f59e0b", // amber
+    "#ec4899", // pink
+    "#ef4444", // red
+    "#a855f7", // violet
 ];
+
+/// Whether a string is a colour we are willing to write to the config.
+pub fn is_hex_colour(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -412,7 +431,9 @@ mod tests {
     fn discovered_accounts_cycle_the_palette() {
         assert_eq!(Account::discovered(" a@b.com ", 0).email, "a@b.com");
         assert_eq!(Account::discovered("a@b.com", 0).color, PALETTE[0]);
-        assert_eq!(Account::discovered("a@b.com", 8).color, PALETTE[0]);
+        // Length-agnostic: adding a colour should not break this.
+        assert_eq!(Account::discovered("a@b.com", PALETTE.len()).color, PALETTE[0]);
+        assert_eq!(Account::discovered("a@b.com", PALETTE.len() - 1).color, PALETTE[PALETTE.len() - 1]);
     }
 
     #[test]
@@ -516,6 +537,21 @@ mod tests {
         // In-page schemes are never outbound.
         assert!(stays_in_pane("mail", "about:blank"));
         assert!(stays_in_pane("mail", "blob:https://mail.google.com/abc"));
+    }
+
+    #[test]
+    fn only_real_hex_colours_are_accepted() {
+        assert!(is_hex_colour("#6366f1"));
+        assert!(is_hex_colour("#ABCDEF"));
+        assert!(!is_hex_colour("6366f1"), "needs the hash");
+        assert!(!is_hex_colour("#63f"), "shorthand is not accepted");
+        assert!(!is_hex_colour("#zzzzzz"));
+        assert!(!is_hex_colour("red"));
+        assert!(!is_hex_colour(""));
+        // Every palette entry must survive its own validator.
+        for c in PALETTE {
+            assert!(is_hex_colour(c), "{c}");
+        }
     }
 
     #[test]

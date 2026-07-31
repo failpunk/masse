@@ -46,6 +46,19 @@ const SHARED_JS: &str = r#"
   };
   const LABELS = { mail: 'Mail', calendar: 'Calendar', drive: 'Drive' };
   const send = (m) => window.ipc.postMessage(JSON.stringify(m));
+  // A highlight can be yellow or indigo, so the glyph sitting on it cannot be a
+  // fixed colour. Relative luminance decides light or dark ink.
+  const readable = (hex) => {
+    const chan = (i) => {
+      const c = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2) > 0.36
+      ? '#11131a' : '#f1f2f4';
+  };
+  const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    + 'stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M5 12.8l4.6 4.4L19 6.6"/></svg>';
   const svg = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round">${d}</svg>`;
 "#;
@@ -72,7 +85,7 @@ pub fn rail_html(state: &str) -> String {
   .ava:hover {{ opacity: .8; filter: none; box-shadow: 0 0 0 2px rgba(255,255,255,.45); }}
   .ava.on {{
     opacity: 1; filter: none;
-    box-shadow: 0 0 0 3px #11131a, 0 0 0 5px #fff;
+    box-shadow: 0 0 0 3px #11131a, 0 0 0 5px var(--hl, #fff);
     transform: scale(1.04);
   }}
   /* A bar on the window edge marks the current account even at a glance. */
@@ -81,7 +94,7 @@ pub fn rail_html(state: &str) -> String {
   .slot.on {{ background: rgba(255,255,255,.08); }}
   .slot.on::before {{
     content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 5px;
-    border-radius: 0 4px 4px 0; background: #fff;
+    border-radius: 0 4px 4px 0; background: var(--hl, #fff);
   }}
   /* Stacked mode: the rail is the whole navigation, so it needs room to breathe
      and to scroll once there are several accounts. */
@@ -111,7 +124,7 @@ pub fn rail_html(state: &str) -> String {
   }}
   .app svg {{ width: 14px; height: 14px; }}
   .app:hover {{ background: rgba(255,255,255,.17); color: #fff; }}
-  .app.on {{ background: #fff; color: #11131a; }}
+  .app.on {{ background: var(--hl, #fff); color: var(--hl-ink, #11131a); }}
 
   .gear {{
     margin-top: auto; width: 44px; height: 44px; border-radius: 13px; flex: none;
@@ -161,6 +174,10 @@ pub fn rail_html(state: &str) -> String {
         const here = a.email.toLowerCase() === (state.active.email || '').toLowerCase();
         const slot = document.createElement('div');
         slot.className = 'slot' + (here ? ' on' : '');
+        // Every highlight in this slot derives from the account's own colour, so the
+        // active account is identifiable without reading the avatar.
+        slot.style.setProperty('--hl', a.color);
+        slot.style.setProperty('--hl-ink', readable(a.color));
 
         const ava = document.createElement('button');
         ava.className = 'ava' + (here ? ' on' : '');
@@ -303,6 +320,19 @@ pub fn settings_html(state: &str) -> String {
   }}
   .ava img {{ width: 100%; height: 100%; object-fit: cover; }}
   .mail {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  /* Ten suggestions rather than a full picker. The tick marks the current colour. */
+  .swatches {{ display: flex; gap: 6px; flex-wrap: wrap; margin: 9px 0 0 41px; }}
+  .chip {{
+    width: 20px; height: 20px; border-radius: 50%; cursor: pointer; flex: none;
+    display: grid; place-items: center;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.28);
+    transition: transform .12s cubic-bezier(.22,1,.36,1);
+  }}
+  .chip:hover {{ transform: scale(1.16); }}
+  .chip svg {{ width: 12px; height: 12px; opacity: 0; }}
+  .chip.on svg {{ opacity: 1; }}
+  .acct {{ padding: 4px 0 2px; border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 7px; }}
+  .acct:last-child {{ border-bottom: 0; margin-bottom: 0; }}
   .kill {{
     font-size: 11.5px; padding: 5px 10px; border-radius: 7px;
     color: rgba(255,255,255,.5); background: rgba(255,255,255,.07);
@@ -440,6 +470,8 @@ pub fn settings_html(state: &str) -> String {
       const list = document.getElementById('accounts');
       list.textContent = '';
       for (const a of state.accounts) {{
+        const acct = document.createElement('div');
+        acct.className = 'acct';
         const row = document.createElement('div');
         row.className = 'row';
 
@@ -473,7 +505,22 @@ pub fn settings_html(state: &str) -> String {
           }}
         }};
         row.appendChild(kill);
-        list.appendChild(row);
+        acct.appendChild(row);
+
+        const swatches = document.createElement('div');
+        swatches.className = 'swatches';
+        for (const c of state.palette) {{
+          const chip = document.createElement('button');
+          chip.className = 'chip' + (c.toLowerCase() === (a.color || '').toLowerCase() ? ' on' : '');
+          chip.style.background = c;
+          chip.style.color = readable(c);
+          chip.title = c;
+          chip.innerHTML = TICK;
+          chip.onclick = () => send({{ type: 'color', email: a.email, color: c }});
+          swatches.appendChild(chip);
+        }}
+        acct.appendChild(swatches);
+        list.appendChild(acct);
       }}
       const navToggle = document.getElementById('navtoggle');
       navToggle.checked = state.nav === 'stacked';

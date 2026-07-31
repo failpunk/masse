@@ -26,7 +26,7 @@ use wry::{
 
 use config::{
     expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
-    NAV_STACKED, SERVICES,
+    NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
@@ -85,6 +85,8 @@ enum Msg {
     Menu(String),
     /// Switch between the split layout and everything-in-the-rail.
     Nav(String),
+    /// Set an account's highlight colour.
+    Colour { email: String, colour: String },
 }
 
 struct App {
@@ -549,6 +551,36 @@ fn main() -> wry::Result<()> {
                 }
             }
 
+            Event::UserEvent(Msg::Colour { email, colour }) => {
+                // Never write junk into the config, whatever the UI sends.
+                if !config::is_hex_colour(&colour) {
+                    eprintln!("[masse] ignoring colour {colour:?}");
+                    return;
+                }
+                let payload = {
+                    let Ok(mut state) = app.try_borrow_mut() else { return };
+                    let wanted = email.trim().to_lowercase();
+                    match state
+                        .config
+                        .accounts
+                        .iter_mut()
+                        .find(|a| a.email.trim().to_lowercase() == wanted)
+                    {
+                        Some(account) => account.color = colour.clone(),
+                        None => return,
+                    }
+                    state.config.save();
+                    println!("[masse] {email} highlight -> {colour}");
+                    rail_state(&state.config, &state.active)
+                };
+                chrome.push(&payload);
+                if let Ok(state) = app.try_borrow() {
+                    if let Some(view) = &state.settings {
+                        let _ = view.evaluate_script(&format!("window.shim.render({payload})"));
+                    }
+                }
+            }
+
             Event::UserEvent(Msg::Reload) => {
                 let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
@@ -778,6 +810,10 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
             email: value["email"].as_str().unwrap_or_default().to_string(),
         },
         Some("nav") => Msg::Nav(value["nav"].as_str().unwrap_or_default().to_string()),
+        Some("color") => Msg::Colour {
+            email: value["email"].as_str().unwrap_or_default().to_string(),
+            colour: value["color"].as_str().unwrap_or_default().to_string(),
+        },
         Some("dials") => Msg::Dials {
             max_live: value["max_live"].as_u64().unwrap_or(2) as usize,
             idle_minutes: value["idle_minutes"].as_u64().unwrap_or(15),
@@ -1039,6 +1075,7 @@ fn rail_state(config: &Config, active: &str) -> String {
         "services": SERVICES,
         "active": { "email": email, "service": service },
         "nav": config.nav,
+        "palette": PALETTE,
         "max_live": config.max_live,
         "idle_minutes": config.idle_minutes,
     })
