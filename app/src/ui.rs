@@ -20,92 +20,6 @@ pub const RAIL_W: f64 = 72.0;
 
 pub const TOPBAR_H: f64 = 46.0;
 
-const TIP_CSS: &str = r#"
-  /* Offscreen twin used only to measure the pill before the host draws it. Must
-     match tip.html exactly or the host will size the tooltip wrongly. */
-  #tipmeasure {
-    position: fixed; left: -9999px; top: -9999px; visibility: hidden;
-    padding: 5px 9px; border-radius: 7px; white-space: nowrap;
-    font: 500 11.5px/1.25 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  }
-"#;
-
-const TIP_JS: &str = r#"
-  // A webview cannot paint outside itself, and the rail is 66px wide, so the
-  // tooltip is a separate webview owned by the window. Each surface measures its
-  // own text and reports the anchor in its own coordinates; the host translates.
-  (function () {
-    const SURFACE = window.__MASSE_SURFACE__;
-    const gauge = document.createElement('div');
-    gauge.id = 'tipmeasure';
-    const attach = () => document.body && document.body.appendChild(gauge);
-    document.addEventListener('DOMContentLoaded', attach);
-    attach();
-
-    let timer = null;
-    let shown = false;
-
-    function hide() {
-      clearTimeout(timer);
-      if (!shown) return;
-      shown = false;
-      send({ type: 'tipHide' });
-    }
-
-    function show(el) {
-      const text = el.getAttribute('data-tip');
-      if (!text) return;
-      gauge.textContent = text;
-      const box = el.getBoundingClientRect();
-      shown = true;
-      send({
-        type: 'tip',
-        surface: SURFACE,
-        text: text,
-        // Anchor, in this surface's own coordinate space.
-        ax: Math.round(box.left), ay: Math.round(box.top),
-        aw: Math.round(box.width), ah: Math.round(box.height),
-        // Measured pill size, so the host can size the webview exactly.
-        tw: Math.ceil(gauge.offsetWidth) + 1, th: Math.ceil(gauge.offsetHeight) + 1,
-      });
-    }
-
-    document.addEventListener('mouseover', (e) => {
-      const el = e.target.closest && e.target.closest('[data-tip]');
-      if (!el) return;
-      clearTimeout(timer);
-      // 90ms reads as instant without flickering as the pointer crosses the rail.
-      timer = setTimeout(() => show(el), 90);
-    });
-    document.addEventListener('mouseout', (e) => {
-      if (e.target.closest && e.target.closest('[data-tip]')) hide();
-    });
-    document.addEventListener('mousedown', hide);
-    document.addEventListener('scroll', hide, true);
-    window.addEventListener('blur', hide);
-  })();
-"#;
-
-/// The tooltip's own webview. Sized by the host to the measured pill, so the pill
-/// fills it and the corners are the only transparent part.
-pub const TIP_HTML: &str = r#"<!doctype html>
-<meta charset="utf-8">
-<style>
-  html,body{margin:0;height:100%;background:transparent;overflow:hidden}
-  #pill{
-    box-sizing:border-box; width:100%; height:100%;
-    display:flex; align-items:center; justify-content:center;
-    padding:5px 9px; border-radius:7px; white-space:nowrap;
-    background:#2b3038; color:#f1f2f4;
-    font:500 11.5px/1.25 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
-    box-shadow:0 6px 20px -4px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.13);
-  }
-</style>
-<div id="pill"></div>
-<script>
-  window.setTip = (t) => { document.getElementById('pill').textContent = t; };
-</script>"#;
-
 const SHARED_CSS: &str = r#"
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -155,7 +69,6 @@ pub fn rail_html(state: &str) -> String {
 <meta charset="utf-8">
 <style>
   {SHARED_CSS}
-  {TIP_CSS}
   body {{
     height: 100vh; padding: 14px 0 12px; display: flex; flex-direction: column;
     align-items: center; gap: 14px;
@@ -234,12 +147,12 @@ pub fn rail_html(state: &str) -> String {
   .gear:active {{ background: rgba(255,255,255,.24); }}
 </style>
 <div id="rail" style="display:flex;flex-direction:column;align-items:center;gap:14px;width:100%"></div>
-<button class="add" id="add" data-tip="Add a Google account">
+<button class="add" id="add">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <path d="M12 6v12M6 12h12"/>
   </svg>
 </button>
-<button class="gear" id="gear" data-tip="Edit accounts.json">
+<button class="gear" id="gear">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
        stroke-linecap="round" stroke-linejoin="round">
     <!-- A toothed cog. The previous version was a ring with long thin rays,
@@ -249,9 +162,7 @@ pub fn rail_html(state: &str) -> String {
   </svg>
 </button>
 <script>
-  window.__MASSE_SURFACE__ = 'rail';
   {SHARED_JS}
-  {TIP_JS}
   window.shim = {{
     render(state) {{
       const stacked = state.nav === 'stacked';
@@ -271,7 +182,6 @@ pub fn rail_html(state: &str) -> String {
         const ava = document.createElement('button');
         ava.className = 'ava' + (here ? ' on' : '');
         ava.style.background = a.color;
-        ava.dataset.tip = a.label ? `${{a.label}} (${{a.email}})` : a.email;
         if (a.avatar) {{
           const img = new Image();
           img.src = a.avatar;
@@ -290,7 +200,6 @@ pub fn rail_html(state: &str) -> String {
           for (const svc of state.services) {{
             const b = document.createElement('button');
             b.className = 'app' + (here && svc === state.active.service ? ' on' : '');
-            b.dataset.tip = `${{LABELS[svc]}} (${{a.email}})`;
             b.innerHTML = svg(ICONS[svc]);
             b.onclick = () => send({{ type: 'show', email: a.email, service: svc }});
             apps.appendChild(b);
@@ -314,7 +223,6 @@ pub fn topbar_html(state: &str) -> String {
 <meta charset="utf-8">
 <style>
   {SHARED_CSS}
-  {TIP_CSS}
   body {{
     height: 100vh; display: flex; align-items: center; gap: 4px; padding: 0 14px;
     border-bottom: 1px solid rgba(255,255,255,.09);
@@ -336,9 +244,7 @@ pub fn topbar_html(state: &str) -> String {
 <div id="tabs" style="display:flex;gap:4px"></div>
 <div class="who" id="who"></div>
 <script>
-  window.__MASSE_SURFACE__ = 'topbar';
   {SHARED_JS}
-  {TIP_JS}
   window.shim = {{
     render(state) {{
       const tabs = document.getElementById('tabs');
@@ -380,7 +286,6 @@ pub fn settings_html(state: &str) -> String {
 <meta charset="utf-8">
 <style>
   {SHARED_CSS}
-  {TIP_CSS}
   body {{
     height: 100vh; display: grid; place-items: center; padding: 28px 28px 80px;
     background: rgba(8, 9, 13, .78); backdrop-filter: blur(14px);
@@ -525,7 +430,7 @@ pub fn settings_html(state: &str) -> String {
     background: #fff; color: #11131a; font-weight: 600; font-size: 13px;
   }}
 </style>
-<button class="promo" id="promo" data-tip="Opens in your browser">
+<button class="promo" id="promo">
   Learn more about our AI research
   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"
        stroke-linecap="round" stroke-linejoin="round">
@@ -568,9 +473,7 @@ pub fn settings_html(state: &str) -> String {
   </footer>
 </div>
 <script>
-  window.__MASSE_SURFACE__ = 'settings';
   {SHARED_JS}
-  {TIP_JS}
   let armed = null;
   let picking = null;
 
@@ -606,7 +509,6 @@ pub fn settings_html(state: &str) -> String {
         const current = document.createElement('button');
         current.className = 'current' + (picking === a.email ? ' open' : '');
         current.style.background = a.color;
-        current.dataset.tip = `Highlight colour ${{a.color}}`;
         current.onclick = (e) => {{
           e.stopPropagation();
           picking = picking === a.email ? null : a.email;
@@ -622,7 +524,6 @@ pub fn settings_html(state: &str) -> String {
             chip.className = 'chip' + (c.toLowerCase() === (a.color || '').toLowerCase() ? ' on' : '');
             chip.style.background = c;
             chip.style.color = readable(c);
-            chip.dataset.tip = c;
             chip.innerHTML = TICK;
             chip.onclick = (e) => {{
               e.stopPropagation();

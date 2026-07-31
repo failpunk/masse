@@ -87,19 +87,6 @@ enum Msg {
     Nav(String),
     /// Set an account's highlight colour.
     Colour { email: String, colour: String },
-    /// A surface wants a tooltip. The anchor is in that surface's coordinates and the
-    /// size was measured by the surface, since only it can measure text.
-    Tip {
-        surface: String,
-        text: String,
-        ax: f64,
-        ay: f64,
-        aw: f64,
-        ah: f64,
-        tw: f64,
-        th: f64,
-    },
-    TipHide,
 }
 
 struct App {
@@ -109,8 +96,6 @@ struct App {
     active: String,
     /// The settings modal, alive only while it is open.
     settings: Option<WebView>,
-    /// The tooltip's own webview, so a tooltip can leave the rail it belongs to.
-    tip: Option<WebView>,
     /// Geometry or last-location changed and has not been written yet. Writing on
     /// every pixel of a drag would hammer the disk.
     dirty: bool,
@@ -315,7 +300,6 @@ fn main() -> wry::Result<()> {
         config,
         panes: HashMap::new(),
         settings: None,
-        tip: None,
         dirty: false,
         rescued: std::collections::HashSet::new(),
     }));
@@ -620,72 +604,6 @@ fn main() -> wry::Result<()> {
                 }
             }
 
-            Event::UserEvent(Msg::Tip { surface, text, ax, ay, aw, ah, tw, th }) => {
-                let nav = match app.try_borrow() {
-                    Ok(a) => a.config.nav.clone(),
-                    Err(_) => return,
-                };
-                // Translate the anchor out of the surface's space into the window's.
-                let (ox, oy) = match surface.as_str() {
-                    "topbar" => (rail_width(&nav), 0.0),
-                    _ => (0.0, 0.0),
-                };
-                let win = window.inner_size().to_logical::<f64>(window.scale_factor());
-                let (ax, ay) = (ax + ox, ay + oy);
-
-                let mut x = ax + aw + 8.0;
-                let mut y = ay + ah / 2.0 - th / 2.0;
-                if x + tw > win.width - 6.0 {
-                    x = ax - tw - 8.0;
-                }
-                if x < 6.0 {
-                    x = ax + aw / 2.0 - tw / 2.0;
-                    y = ay + ah + 8.0;
-                }
-                let y = y.clamp(6.0, (win.height - th - 6.0).max(6.0));
-                let x = x.clamp(6.0, (win.width - tw - 6.0).max(6.0));
-                let bounds = rect(x, y, tw, th);
-
-                let missing = match app.try_borrow() {
-                    Ok(a) => a.tip.is_none(),
-                    Err(_) => return,
-                };
-                if missing {
-                    match WebViewBuilder::new()
-                        .with_bounds(bounds)
-                        .with_transparent(true)
-                        .with_html(ui::TIP_HTML)
-                        .build_as_child(&window)
-                    {
-                        Ok(view) => {
-                            if let Ok(mut a) = app.try_borrow_mut() {
-                                a.tip = Some(view);
-                            }
-                        }
-                        Err(err) => {
-                            eprintln!("[masse] could not create the tooltip: {err}");
-                            return;
-                        }
-                    }
-                }
-                if let Ok(a) = app.try_borrow() {
-                    if let Some(view) = &a.tip {
-                        let _ = view.set_bounds(bounds);
-                        let text = serde_json::to_string(&text).unwrap_or_default();
-                        let _ = view.evaluate_script(&format!("window.setTip({text})"));
-                        let _ = view.set_visible(true);
-                    }
-                }
-            }
-
-            Event::UserEvent(Msg::TipHide) => {
-                if let Ok(a) = app.try_borrow() {
-                    if let Some(view) = &a.tip {
-                        let _ = view.set_visible(false);
-                    }
-                }
-            }
-
             Event::UserEvent(Msg::Reload) => {
                 let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
@@ -912,9 +830,6 @@ fn show(
         match built {
             Ok(view) => {
                 state.panes.insert(key.clone(), view);
-                // Child webviews stack in creation order, so a pane built now would
-                // sit above the tooltip. Drop it; the next hover rebuilds it on top.
-                state.tip = None;
             }
             Err(err) => {
                 eprintln!("[masse] could not build pane {key}: {err}");
@@ -965,20 +880,6 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
             email: value["email"].as_str().unwrap_or_default().to_string(),
         },
         Some("nav") => Msg::Nav(value["nav"].as_str().unwrap_or_default().to_string()),
-        Some("tip") => {
-            let n = |k: &str| value[k].as_f64().unwrap_or(0.0);
-            Msg::Tip {
-                surface: value["surface"].as_str().unwrap_or_default().to_string(),
-                text: value["text"].as_str().unwrap_or_default().to_string(),
-                ax: n("ax"),
-                ay: n("ay"),
-                aw: n("aw"),
-                ah: n("ah"),
-                tw: n("tw"),
-                th: n("th"),
-            }
-        }
-        Some("tipHide") => Msg::TipHide,
         Some("color") => Msg::Colour {
             email: value["email"].as_str().unwrap_or_default().to_string(),
             colour: value["color"].as_str().unwrap_or_default().to_string(),
