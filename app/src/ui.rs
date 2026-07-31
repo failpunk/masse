@@ -301,10 +301,10 @@ pub fn settings_html(state: &str) -> String {
     display: flex; align-items: center; gap: 11px; padding: 9px 10px;
     border-radius: 11px; background: rgba(255,255,255,.04); margin-bottom: 5px;
   }}
-  .dial label {{ flex: 1; font-size: 12.5px; }}
+  .dial > label:not(.switch) {{ flex: 1; font-size: 12.5px; }}
   /* A switch rather than two buttons: with a segmented control it was not obvious
      which side was active. */
-  .switch {{ flex: none; cursor: pointer; display: inline-flex; }}
+  .switch {{ flex: none; margin-left: auto; cursor: pointer; display: inline-flex; }}
   .switch input {{ position: absolute; opacity: 0; pointer-events: none; }}
   .switch span {{
     width: 44px; height: 26px; border-radius: 999px; position: relative;
@@ -320,6 +320,9 @@ pub fn settings_html(state: &str) -> String {
   .switch input:checked + span::after {{ transform: translateX(18px); }}
   .switch input:focus-visible + span {{ box-shadow: 0 0 0 2px rgba(255,255,255,.5); }}
   .dial small {{ display: block; color: rgba(255,255,255,.38); font-size: 11px; margin-top: 2px; }}
+  input[type="number"], input[type="text"] {{
+    margin-left: auto; flex: none;
+  }}
   input {{
     width: 56px; font: inherit; text-align: center; padding: 5px; border-radius: 7px;
     border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: #fff;
