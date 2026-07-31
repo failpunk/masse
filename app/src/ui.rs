@@ -397,8 +397,8 @@ pub fn settings_html(state: &str) -> String {
 
   <h2>Navigation</h2>
   <div class="dial">
-    <label for="navtoggle">All navigation in the left rail
-      <small>Mail, Calendar and Drive under each account. Off keeps them along the top.</small></label>
+    <label for="navtoggle">Consolidate navigation in left rail
+      <small>Provides one-click access to account tools, but with slightly more crowded navigation</small></label>
     <label class="switch"><input type="checkbox" id="navtoggle" /><span></span></label>
   </div>
 
