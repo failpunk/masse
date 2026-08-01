@@ -76,6 +76,18 @@ pub struct MonitorSpot {
     /// The window's position relative to this display's top left.
     pub dx: f64,
     pub dy: f64,
+    /// Where this display sits in the desktop's coordinate space. Two identical
+    /// external monitors report the SAME name and the SAME size, so name and size
+    /// alone cannot tell them apart and the window kept coming back on the wrong
+    /// one. The origin is what actually distinguishes them.
+    #[serde(default)]
+    pub ox: f64,
+    #[serde(default)]
+    pub oy: f64,
+    /// The display's scale factor when the size below was recorded. A remembered
+    /// physical size only means something alongside the scale it was taken at.
+    #[serde(default)]
+    pub scale: f64,
 }
 
 pub const NAV_SPLIT: &str = "split";
@@ -318,6 +330,25 @@ pub fn route(service: &str, url: &str) -> Route {
 /// For target=_blank, which is how Gmail, Calendar and Drive mark a real link the
 /// user clicked. Everything leaves, including Google's own apps, because a link is
 /// a link. Nothing is silently swallowed except beacons.
+/// Whether this looks like a file coming down rather than a page to visit.
+///
+/// Gmail and Drive start a download by opening a new window at one of these, and a
+/// blob: URL is content the page built itself, which is only ever a download or a
+/// preview. Either way it has to stay in the app: handing it to the browser means a
+/// second sign-in, and denying it means nothing happens at all.
+pub fn is_download(url: &str) -> bool {
+    if url.starts_with("blob:") {
+        return true;
+    }
+    let Some(host) = host_of(url) else { return false };
+    matches!(
+        host,
+        "mail-attachment.googleusercontent.com" | "drive.usercontent.google.com"
+    ) || (host.ends_with(".googleusercontent.com") && url.contains("/download"))
+        || url.contains("view=att")
+        || url.contains("export=download")
+}
+
 pub fn route_link(_service: &str, url: &str) -> Route {
     match host_of(url) {
         Some(host) if is_tracker(host) => Route::Drop,
@@ -519,6 +550,21 @@ mod tests {
         }
         // A third-party frame still leaves.
         assert_eq!(route("mail", "https://example.com/tracking-frame"), Route::External);
+    }
+
+    #[test]
+    fn attachments_are_recognised_as_downloads() {
+        assert!(is_download(
+            "https://mail-attachment.googleusercontent.com/attachment/u/0/?view=att&th=1"
+        ));
+        assert!(is_download("https://drive.usercontent.google.com/download?id=abc"));
+        assert!(is_download("https://mail.google.com/mail/u/0/?ui=2&view=att&disp=safe"));
+        assert!(is_download("blob:https://mail.google.com/9f2c-1"));
+        assert!(is_download("https://docs.google.com/spreadsheets/d/x/export?export=download"));
+        // Ordinary pages are not downloads.
+        assert!(!is_download("https://example.com/article"));
+        assert!(!is_download("https://mail.google.com/mail/u/0/#inbox"));
+        assert!(!is_download("https://docs.google.com/document/d/abc/edit"));
     }
 
     #[test]

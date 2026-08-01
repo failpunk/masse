@@ -26,7 +26,7 @@ use wry::{
 
 use config::{
     expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
-    MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
+    is_download, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
@@ -79,6 +79,9 @@ enum Msg {
     Reload,
     /// Hand a URL to the real browser instead of showing it in a pane.
     External(String),
+    /// Load a URL in the visible pane. Used for downloads, which have to stay in the
+    /// app: WebKit only turns a response into a download if it makes the request.
+    LoadHere(String),
     /// Test hook: make the visible pane attempt a navigation.
     Drive(String),
     /// A menu item fired. Carries muda's item id.
@@ -87,6 +90,14 @@ enum Msg {
     Nav(String),
     /// Set an account's highlight colour.
     Colour { email: String, colour: String },
+    /// A page-side script grabbed a download itself (blob or fetch) and handed us
+    /// the bytes over IPC, because the click that triggered it never reached any
+    /// of wry's navigation hooks. See PROBE's click-intercept.
+    SaveBlob { name: String, data: String },
+    /// Ask the visible pane to fetch a URL itself and post the bytes back, for a
+    /// download navigation we cancelled because WebKit would have rendered it
+    /// rather than saving it.
+    GrabBlob(String),
 }
 
 struct App {
@@ -134,17 +145,39 @@ fn main() -> wry::Result<()> {
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let saved = config.window;
-    let mut builder = WindowBuilder::new()
-        .with_title("Masse")
-        .with_min_inner_size(LogicalSize::new(680.0, 480.0));
-    builder = match saved {
-        Some([w, h, ..]) if w >= 400.0 && h >= 300.0 => {
-            builder.with_inner_size(tao::dpi::PhysicalSize::new(w, h))
+    // What the windowing layer actually sees, which is not always what Displays
+    // shows: two identical monitors can report the same name and size, and the
+    // scale factor is what makes a remembered physical size land right.
+    if std::env::args().any(|a| a == "--monitors") {
+        for m in event_loop.available_monitors() {
+            let (p, s) = (m.position(), m.size());
+            println!(
+                "name={:?} pos=({}, {}) size={}x{} scale={}",
+                m.name().unwrap_or_default(),
+                p.x,
+                p.y,
+                s.width,
+                s.height,
+                m.scale_factor()
+            );
         }
-        _ => builder.with_inner_size(LogicalSize::new(1340.0, 900.0)),
-    };
-    let window = builder.build(&event_loop).expect("window");
+        println!("saved window : {:?}", config.window);
+        println!("saved monitor: {:?}", config.monitor);
+        return Ok(());
+    }
+
+    let saved = config.window;
+    // Deliberately NOT sized from `saved` here. A physical size given at build time
+    // is resolved against the display the window is born on, not the one it is
+    // about to be moved to, which silently halved the window on every launch.
+    // restore_position applies the remembered size once the target display, and so
+    // the right scale factor, is known.
+    let window = WindowBuilder::new()
+        .with_title("Masse")
+        .with_min_inner_size(LogicalSize::new(680.0, 480.0))
+        .with_inner_size(LogicalSize::new(1340.0, 900.0))
+        .build(&event_loop)
+        .expect("window");
     restore_position(&window, saved, config.monitor.as_ref());
 
     let boot = rail_state(&config, &key_of(&first.email, "mail"));
@@ -302,6 +335,10 @@ fn main() -> wry::Result<()> {
 
         match event {
             Event::NewEvents(StartCause::Init) => {
+                // The window is on its final display by now, so its scale factor is
+                // the one the remembered physical size was recorded against.
+                restore_size(&window, saved);
+
                 // Size the chrome from the real window, not the constants it was
                 // built with.
                 let nav = app.borrow().config.nav.clone();
@@ -591,6 +628,39 @@ fn main() -> wry::Result<()> {
                 }
             }
 
+            Event::UserEvent(Msg::LoadHere(url)) => {
+                let Ok(state) = app.try_borrow() else { return };
+                if let Some(view) = state.panes.get(&state.active) {
+                    let _ = view.load_url(&url);
+                }
+            }
+
+            Event::UserEvent(Msg::SaveBlob { name, data }) => {
+                let Some(bytes) = b64_decode(&data) else {
+                    eprintln!("[masse] blob save: could not decode {name}");
+                    return;
+                };
+                let Some(path) = unique_download_path(&name) else {
+                    eprintln!("[masse] blob save: no HOME, dropping {name}");
+                    return;
+                };
+                match std::fs::write(&path, &bytes) {
+                    Ok(()) => {
+                        println!("[masse] saved {}", path.display());
+                        let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
+                    }
+                    Err(err) => eprintln!("[masse] blob save failed: {err}"),
+                }
+            }
+
+            Event::UserEvent(Msg::GrabBlob(url)) => {
+                let Ok(state) = app.try_borrow() else { return };
+                if let Some(view) = state.panes.get(&state.active) {
+                    let arg = serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".into());
+                    let _ = view.evaluate_script(&format!("window.__masseGrab && window.__masseGrab({arg})"));
+                }
+            }
+
             Event::UserEvent(Msg::Reload) => {
                 let Ok(state) = app.try_borrow() else { return };
                 if let Some(view) = state.panes.get(&state.active) {
@@ -683,19 +753,31 @@ fn restore_position(window: &Window, saved: Option<[f64; 4]>, spot: Option<&Moni
             x >= l - 8.0 && y >= t - 8.0 && x < l + sz.width as f64 && y < t + sz.height as f64
         })
     };
+    let shapes: Vec<Screen> = monitors
+        .iter()
+        .map(|m| {
+            let (o, sz) = (m.position(), m.size());
+            Screen {
+                name: m.name().unwrap_or_default(),
+                w: sz.width as f64,
+                h: sz.height as f64,
+                ox: o.x as f64,
+                oy: o.y as f64,
+            }
+        })
+        .collect();
 
     if let Some(spot) = spot {
-        let match_ = monitors.iter().find(|m| {
-            m.name().unwrap_or_default() == spot.name
-                && m.size().width as f64 == spot.w
-                && m.size().height as f64 == spot.h
-        });
+        let match_ = pick_monitor(&shapes, spot).map(|i| &monitors[i]);
         if let Some(m) = match_ {
             let o = m.position();
             let x = o.x as f64 + spot.dx;
             let y = o.y as f64 + spot.dy;
             let label = if spot.name.is_empty() { "unnamed display" } else { &spot.name };
-            println!("[masse] restoring onto {label} at +{}, +{}", spot.dx, spot.dy);
+            println!(
+                "[masse] restoring onto {label} at ({}, {}) +{}, +{}",
+                o.x, o.y, spot.dx, spot.dy
+            );
             window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
             return;
         }
@@ -709,6 +791,53 @@ fn restore_position(window: &Window, saved: Option<[f64; 4]>, spot: Option<&Moni
         Some(_) => println!("[masse] saved position is off every display, ignoring it"),
         None => {}
     }
+}
+
+/// The identifying facts about one display, lifted out of tao so the matching
+/// below can be tested without a window server.
+#[derive(Debug, Clone, PartialEq)]
+struct Screen {
+    name: String,
+    w: f64,
+    h: f64,
+    ox: f64,
+    oy: f64,
+}
+
+/// Which display a remembered spot refers to.
+///
+/// Origin is checked first and name/size only as a fallback, because two identical
+/// external monitors report the SAME name and the SAME size. Matching on those
+/// alone always returned the first of the pair, which is why the window kept
+/// reopening on the wrong screen. The fallback still matters: a display that has
+/// been moved in Displays keeps its identity but changes origin.
+fn pick_monitor(screens: &[Screen], spot: &MonitorSpot) -> Option<usize> {
+    let same_shape = |s: &Screen| s.name == spot.name && s.w == spot.w && s.h == spot.h;
+    screens
+        .iter()
+        .position(|s| same_shape(s) && s.ox == spot.ox && s.oy == spot.oy)
+        .or_else(|| screens.iter().position(same_shape))
+}
+
+/// Apply the remembered size, which must happen AFTER the window has actually
+/// landed on its target display.
+///
+/// Every size tao accepts is resolved against the window's current scale factor,
+/// so asking for one before the move has registered uses the OLD display's scale.
+/// Both failure modes were real here: sizing at build time on the 2x built-in
+/// halved the window on a 1x monitor every launch, and sizing immediately after
+/// `set_outer_position` doubled it instead, because the move had not landed yet.
+/// Called from the first loop iteration, by which point the scale factor is true.
+fn restore_size(window: &Window, saved: Option<[f64; 4]>) {
+    let Some([w, h, ..]) = saved else { return };
+    if w < 400.0 || h < 300.0 {
+        return;
+    }
+    println!(
+        "[masse] restoring size {w}x{h} physical (window scale now {})",
+        window.scale_factor()
+    );
+    window.set_inner_size(tao::dpi::PhysicalSize::new(w, h));
 }
 
 /// Record where the window is, in physical pixels so it survives moving between
@@ -729,6 +858,9 @@ fn remember_geometry(app: &Rc<RefCell<App>>, window: &Window) {
             h: sz.height as f64,
             dx: pos.x as f64 - o.x as f64,
             dy: pos.y as f64 - o.y as f64,
+            ox: o.x as f64,
+            oy: o.y as f64,
+            scale: m.scale_factor(),
         }
     });
 
@@ -830,8 +962,17 @@ fn show(
                 let proxy = proxy.clone();
                 let service = service.to_string();
                 move |url, _features| {
-                    if route_link(&service, &url) != Route::Drop {
+                    // An attachment opens as a new window too. Denying it means the
+                    // request is never made and nothing downloads; sending it to the
+                    // browser means signing in again there. So it goes to the pane,
+                    // where WebKit sees the attachment response and downloads it.
+                    if is_download(&url) {
+                        println!("[masse] download link: {}", &url[..url.len().min(120)]);
+                        let _ = proxy.send_event(Msg::LoadHere(url));
+                    } else if route_link(&service, &url) != Route::Drop {
                         let _ = proxy.send_event(Msg::External(url));
+                    } else {
+                        println!("[masse] dropped link: {}", &url[..url.len().min(120)]);
                     }
                     wry::NewWindowResponse::Deny
                 }
@@ -841,8 +982,26 @@ fn show(
                 let proxy = proxy.clone();
                 let service = service.to_string();
                 move |url| match route(&service, &url) {
-                    Route::Stay => true,
-                    Route::Drop => false,
+                    Route::Stay => {
+                        // Gmail's download button navigates (in a hidden frame) to
+                        // the attachment URL and expects the browser to save the
+                        // response. WebKit only turns a response into a download
+                        // when it cannot display the MIME type, so a JPEG just
+                        // renders into nowhere and the click appears to do nothing.
+                        // Cancel it and have the page fetch the bytes instead.
+                        if is_download(&url) {
+                            println!("[masse] download nav caught: {}", &url[..url.len().min(140)]);
+                            let _ = proxy.send_event(Msg::GrabBlob(url));
+                            return false;
+                        }
+                        true
+                    }
+                    Route::Drop => {
+                        if !url.contains("doubleclick") && !url.contains("analytics") {
+                            println!("[masse] dropped nav: {}", &url[..url.len().min(120)]);
+                        }
+                        false
+                    }
                     Route::External => {
                         let _ = proxy.send_event(Msg::External(url));
                         false
@@ -861,7 +1020,11 @@ fn show(
                     target.push(name);
                     *path = target;
                 }
-                println!("[masse] downloading {url} -> {}", path.display());
+                println!(
+                    "[masse] download started: {} -> {}",
+                    &url[..url.len().min(100)],
+                    path.display()
+                );
                 true
             })
             .with_download_completed_handler(|_url, path, success| match (success, path) {
@@ -965,6 +1128,193 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
             email: email.to_string(),
             src: src.to_string(),
         });
+    }
+    if value["type"] == "jslog" {
+        println!("[js] {}", value["msg"].as_str().unwrap_or_default());
+        return;
+    }
+    if value["type"] == "downloadUrl" {
+        let Some(url) = value["url"].as_str() else { return };
+        println!("[masse] page-caught download url: {}", &url[..url.len().min(120)]);
+        let _ = proxy.send_event(Msg::LoadHere(url.to_string()));
+        return;
+    }
+    if value["type"] == "save" {
+        let (Some(name), Some(data)) = (value["name"].as_str(), value["data"].as_str()) else {
+            return;
+        };
+        println!("[masse] blob save: {name} ({} bytes b64)", data.len());
+        let _ = proxy.send_event(Msg::SaveBlob {
+            name: name.to_string(),
+            data: data.to_string(),
+        });
+    }
+}
+
+/// Decodes a standard (or data-URL) base64 payload. Hand-rolled rather than a
+/// crate: it is twenty lines, and pulling in a dependency for one call site
+/// works against why this app is written in Rust over Electron in the first
+/// place.
+fn b64_decode(input: &str) -> Option<Vec<u8>> {
+    let body = input.split(',').next_back().unwrap_or(input);
+    let mut val = 0u32;
+    let mut bits = 0u32;
+    let mut out = Vec::with_capacity(body.len() / 4 * 3);
+    for c in body.bytes() {
+        let digit = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b'\n' | b'\r' => continue,
+            _ => return None,
+        } as u32;
+        val = (val << 6) | digit;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((val >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// Whatever the page suggested for a filename, made safe to put in a path:
+/// no separators, no leading dot, never empty.
+fn safe_filename(name: &str) -> String {
+    let cleaned: String = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .chars()
+        .map(|c| if c.is_control() { '_' } else { c })
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.');
+    if cleaned.is_empty() {
+        "download".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// `~/Downloads/name`, or `~/Downloads/name (2)` etc. if that name is taken.
+/// Never overwrites an existing file the way a raw write would.
+fn unique_download_path(name: &str) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let mut dir = std::path::PathBuf::from(home);
+    dir.push("Downloads");
+    let name = safe_filename(name);
+    let (stem, ext) = match name.rfind('.') {
+        Some(0) | None => (name.as_str(), ""),
+        Some(at) => (&name[..at], &name[at..]),
+    };
+    let mut candidate = dir.join(&name);
+    let mut n = 2;
+    while candidate.exists() {
+        candidate = dir.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    Some(candidate)
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::{pick_monitor, Screen};
+    use crate::config::MonitorSpot;
+
+    fn screen(name: &str, ox: f64, oy: f64) -> Screen {
+        Screen { name: name.into(), w: 2560.0, h: 1440.0, ox, oy }
+    }
+
+    fn spot(name: &str, ox: f64, oy: f64) -> MonitorSpot {
+        MonitorSpot {
+            name: name.into(),
+            w: 2560.0,
+            h: 1440.0,
+            dx: 0.0,
+            dy: 30.0,
+            ox,
+            oy,
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn two_identical_monitors_are_told_apart_by_origin() {
+        // The real setup that caused this: both externals report the same name and
+        // the same size, and differ only in where they sit.
+        let screens = vec![
+            screen("Monitor #41040", 0.0, 0.0),
+            screen("Monitor #12857", 1728.0, -516.0),
+            screen("Monitor #12857", -2560.0, -540.0),
+        ];
+        assert_eq!(pick_monitor(&screens, &spot("Monitor #12857", -2560.0, -540.0)), Some(2));
+        assert_eq!(pick_monitor(&screens, &spot("Monitor #12857", 1728.0, -516.0)), Some(1));
+    }
+
+    #[test]
+    fn a_display_that_moved_is_still_recognised_by_name_and_size() {
+        let screens = vec![screen("Monitor #12857", 4000.0, 0.0)];
+        assert_eq!(pick_monitor(&screens, &spot("Monitor #12857", 1728.0, -516.0)), Some(0));
+    }
+
+    #[test]
+    fn a_display_that_is_gone_matches_nothing() {
+        let screens = vec![screen("Monitor #41040", 0.0, 0.0)];
+        assert_eq!(pick_monitor(&screens, &spot("Monitor #12857", 1728.0, -516.0)), None);
+    }
+
+    #[test]
+    fn an_old_config_without_an_origin_still_finds_its_display() {
+        // Upgrades: ox/oy default to 0, so only the name-and-size fallback can hit.
+        let screens = vec![
+            screen("Monitor #41040", 0.0, 0.0),
+            screen("Monitor #12857", 1728.0, -516.0),
+        ];
+        assert_eq!(pick_monitor(&screens, &spot("Monitor #12857", 0.0, 0.0)), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::{b64_decode, safe_filename};
+
+    #[test]
+    fn decodes_plain_base64() {
+        assert_eq!(b64_decode("aGVsbG8=").unwrap(), b"hello");
+    }
+
+    #[test]
+    fn decodes_a_data_url_by_taking_the_part_after_the_comma() {
+        assert_eq!(
+            b64_decode("data:image/jpeg;base64,aGVsbG8=").unwrap(),
+            b"hello"
+        );
+    }
+
+    #[test]
+    fn decodes_input_with_no_padding() {
+        assert_eq!(b64_decode("aGVsbG8").unwrap(), b"hello");
+    }
+
+    #[test]
+    fn rejects_bytes_outside_the_base64_alphabet() {
+        assert!(b64_decode("not valid!!").is_none());
+    }
+
+    #[test]
+    fn filename_strips_any_path_and_leading_dots() {
+        assert_eq!(safe_filename("../../etc/passwd"), "passwd");
+        assert_eq!(safe_filename("...secret"), "secret");
+        assert_eq!(safe_filename("Attachment0.jpeg"), "Attachment0.jpeg");
+    }
+
+    #[test]
+    fn filename_never_comes_back_empty() {
+        assert_eq!(safe_filename(""), "download");
+        assert_eq!(safe_filename("."), "download");
     }
 }
 
@@ -1199,6 +1549,125 @@ fn rail_state(config: &Config, active: &str) -> String {
 
 
 const PROBE: &str = r#"
+(() => {
+  // Gmail/Drive's download icons never reach wry's navigation hooks: the click
+  // is handled entirely in page JS (fetch + blob + a synthetic <a download>),
+  // both for the attachment-chip icon and the preview/"print window" overlay's
+  // icon. So downloads are caught here, at the click, instead of relying on
+  // WebKit to notice a response and turn it into a native download.
+  function isDownloadHref(href) {
+    if (!href) return false;
+    if (href.startsWith('blob:')) return true;
+    if (/[?&](view=att|export=download)(&|$)/.test(href)) return true;
+    try {
+      const host = new URL(href, location.href).hostname;
+      if (host === 'mail-attachment.googleusercontent.com' || host === 'drive.usercontent.google.com') return true;
+      if (host.endsWith('.googleusercontent.com') && href.includes('/download')) return true;
+    } catch (e) {}
+    return false;
+  }
+  function nameFor(anchor, url, disposition) {
+    if (anchor && anchor.hasAttribute('download') && anchor.getAttribute('download')) {
+      return anchor.getAttribute('download');
+    }
+    if (disposition) {
+      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+      if (m) { try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; } }
+    }
+    // Gmail's attachment URLs carry no filename in the path, so fall back to the
+    // name it puts in its own download button before giving up.
+    const button = document.querySelector('[aria-label^="Download attachment "]');
+    if (button) {
+      const named = button.getAttribute('aria-label').replace(/^Download attachment\s+/, '').trim();
+      if (named) return named;
+    }
+    try {
+      const last = new URL(url, location.href).pathname.split('/').filter(Boolean).pop();
+      if (last && last.includes('.')) return decodeURIComponent(last);
+    } catch (e) {}
+    return 'download';
+  }
+  function grabBlob(url, anchor, forcedName) {
+    fetch(url, { credentials: 'include' })
+      .then((r) => r.blob().then((blob) => ({ blob, disposition: r.headers.get('content-disposition') })))
+      .then(({ blob, disposition }) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          window.ipc.postMessage(JSON.stringify({
+            type: 'save', name: forcedName || nameFor(anchor, url, disposition), data: reader.result,
+          }));
+        };
+        reader.readAsDataURL(blob);
+      })
+      .catch((e) => window.ipc.postMessage(JSON.stringify({ type: 'jslog', msg: 'download fetch failed: ' + e })));
+  }
+  // Called from the Rust side when a download navigation was cancelled.
+  window.__masseGrab = (url) => grabBlob(url, null, null);
+  // Gmail's download control is a <button aria-label="Download attachment X">,
+  // not a link, and the URL lives on the surrounding attachment card in a
+  // `download_url` attribute shaped "mime:name:url". Nothing about this click
+  // ever becomes a navigation wry can see, so it has to be caught here.
+  function attachmentDownload(el) {
+    let node = el;
+    for (let i = 0; node && i < 12; i++) {
+      const label = node.getAttribute && node.getAttribute('aria-label');
+      if (label && /^Download\b/i.test(label)) {
+        // Found the button. The card holding the URL is somewhere above it.
+        let card = node;
+        for (let j = 0; card && j < 12; j++) {
+          const holder = card.querySelector ? card.querySelector('[download_url]') : null;
+          const own = card.getAttribute && card.getAttribute('download_url');
+          const raw = own || (holder && holder.getAttribute('download_url'));
+          if (raw) {
+            // "image/jpeg:Attachment0.jpeg:https://mail.google.com/..."
+            const first = raw.indexOf(':');
+            const second = raw.indexOf(':', first + 1);
+            if (second > -1) {
+              return { url: raw.slice(second + 1), name: raw.slice(first + 1, second) };
+            }
+          }
+          card = card.parentElement;
+        }
+        // The button is there but the card is not shaped as expected. Let the
+        // click through: the navigation it triggers is caught on the Rust side.
+        return null;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+  document.addEventListener('click', (event) => {
+    const attachment = attachmentDownload(event.target);
+    if (attachment) {
+      event.preventDefault();
+      event.stopPropagation();
+      grabBlob(attachment.url, null, attachment.name);
+      return;
+    }
+    let el = event.target;
+    while (el && el !== document.body) {
+      if (el.tagName === 'A' && el.href) {
+        if (el.href.startsWith('blob:')) {
+          event.preventDefault();
+          event.stopPropagation();
+          grabBlob(el.href, el);
+        } else if (el.hasAttribute('download') || isDownloadHref(el.href)) {
+          event.preventDefault();
+          event.stopPropagation();
+          // Loading this URL in the pane (the old approach) never produced a
+          // real file: WebKit's download delegate does not fire for a plain
+          // load_url() navigation the way it does for a new-window request.
+          // Fetching and saving the bytes ourselves does not depend on that
+          // delegate at all, and this URL is same-origin with the page, so
+          // there is no CORS obstacle to the fetch.
+          grabBlob(el.href, el);
+        }
+        break;
+      }
+      el = el.parentElement;
+    }
+  }, true);
+})();
 window.addEventListener('load', () => {
   const find = () => {
     for (const el of document.querySelectorAll('[aria-label*="Google Account"]')) {

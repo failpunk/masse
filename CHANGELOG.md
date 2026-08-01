@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.14.2
+- **Attachment downloads work.** Clicking Gmail's download icon did nothing at
+  all. The click does reach WebKit as a navigation to the attachment URL, but wry
+  only turns a response into a download when WebKit cannot display the MIME type,
+  so a JPEG rendered invisibly into a hidden frame and no file was ever written.
+  That navigation is now cancelled and the bytes are fetched in the page and
+  handed to the native side, which writes them to `~/Downloads` without
+  overwriting an existing file. Gmail's download control is a `<button>` carrying
+  the URL in a `download_url` attribute on the surrounding card, not a link, so
+  the button is caught directly too; the cancelled-navigation path stays as the
+  backstop for the other attachment surfaces.
+- **The window reopens where and how it was left.** Two faults, both only visible
+  on a multi-display setup. Two identical external monitors report the SAME name
+  and the SAME size, so matching on those alone always returned the first of the
+  pair and the window came back on the wrong screen; the display's origin is now
+  what identifies it. Separately, every size tao accepts is resolved against the
+  window's current scale factor, so a remembered physical size applied at build
+  time used the 2x built-in's scale and halved the window on a 1x monitor, every
+  launch, until it hit the minimum. The size is now applied on the first loop
+  iteration, once the window is actually on its target display.
+- `--monitors` dumps what the windowing layer sees (name, origin, size, scale),
+  which is not what Displays shows and is what made the above diagnosable.
+
 ## 0.8.1
 - Fixed a crash on Cmd+1. A RefCell borrow was held across calls into AppKit and
   WebKit, which pump the run loop and re-enter the event handler, so the second
