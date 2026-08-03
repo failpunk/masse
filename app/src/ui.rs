@@ -450,20 +450,30 @@ pub fn settings_html(state: &str) -> String {
 
   <h2>Navigation</h2>
   <div class="dial">
-    <label for="navtoggle">Consolidate navigation in left rail
-      <small>Provides one-click access to account tools, but with slightly more crowded navigation</small></label>
+    <label for="navtoggle">Put every app in the left rail
+      <small>Show each account's Mail, Calendar and Drive in the rail, so you can go
+      straight to any of them. The rail gets more crowded.</small></label>
     <label class="switch"><input type="checkbox" id="navtoggle" /><span></span></label>
+  </div>
+
+  <h2>Links</h2>
+  <div class="dial">
+    <label for="linktoggle">Fix Google account links
+      <small>Let Masse rewrite Google meeting links so they open in the appropriate
+      account. Very useful when you're signed into more than one Google account.</small></label>
+    <label class="switch"><input type="checkbox" id="linktoggle" /><span></span></label>
   </div>
 
   <h2>Memory</h2>
   <div class="dial">
-    <label>Panes kept in memory
-      <small>Fewer means less memory and a reload when you switch back.</small></label>
+    <label>Pages kept open
+      <small>Fewer pages use less memory. Closed pages reload when you go back to
+      them.</small></label>
     <input id="maxLive" type="number" min="1" max="9">
   </div>
   <div class="dial">
-    <label>Close unused panes after
-      <small>0 keeps them loaded forever.</small></label>
+    <label>Close a page you have not used for
+      <small>Set this to 0 to keep every page open.</small></label>
     <span class="withunit"><input id="idle" type="number" min="0" max="600"> minutes</span>
   </div>
 
@@ -562,6 +572,10 @@ pub fn settings_html(state: &str) -> String {
       navToggle.checked = state.nav === 'stacked';
       navToggle.onchange = () =>
         send({{ type: 'nav', nav: navToggle.checked ? 'stacked' : 'split' }});
+      const linkToggle = document.getElementById('linktoggle');
+      linkToggle.checked = state.rewrite_links !== false;
+      linkToggle.onchange = () =>
+        send({{ type: 'rewriteLinks', on: linkToggle.checked }});
       document.getElementById('maxLive').value = state.max_live;
       document.getElementById('idle').value = state.idle_minutes;
     }},

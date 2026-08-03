@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.16.0
+- **Link rewriting is now a setting, on by default.** Settings has a Links section
+  with one switch: "Fix Google account links". Turn it off and every link is handed
+  to the browser exactly as the page wrote it. The switch takes effect on the next
+  click, not the next launch, and is stored as `rewrite_links` in `accounts.json`.
+  An existing config without the field keeps rewriting on, so upgrading changes
+  nothing.
+- **Links to other sites no longer go through Google.** Gmail and Chat do not store
+  the link you were given; they store `www.google.com/url?...&url=<the real one>`.
+  Opening that means a click on a link to somebody else's site travels through
+  Google first. The destination is right there in the query, so Masse now unwraps it
+  and opens the real address directly. Rejects anything that is not http or https,
+  so a crafted `url=javascript:...` cannot be handed to `open`.
+- Rewrote the settings copy. It described the implementation rather than saying what
+  the switch does, and one line ("Off hands every link over exactly as written") was
+  simply unreadable.
+
 ## 0.15.3
 - **Only meeting links get addressed to an account.** 0.15.2 rewrote every
   Google-owned link, and Gmail and Chat wrap *every* outbound link in a

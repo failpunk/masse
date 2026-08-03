@@ -26,7 +26,7 @@ use wry::{
 
 use config::{
     expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
-    is_download, with_account, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
+    is_download, unwrap_redirect, with_account, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
@@ -42,6 +42,21 @@ use ui::{RAIL_W, TOPBAR_H};
 static SHOWN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 static DRY_RUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Mirrors `config.rewrite_links`. The link handlers are per-pane closures built
+/// when a pane is created, so they cannot see later config edits; a flag they read
+/// at click time means the setting takes effect immediately rather than on the next
+/// relaunch.
+static REWRITE_LINKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// A link on its way to the browser, adjusted only if the setting allows it.
+fn outbound(url: &str, account: &str) -> String {
+    if !REWRITE_LINKS.load(std::sync::atomic::Ordering::Relaxed) {
+        return url.to_string();
+    }
+    // Unwrap first: the destination is what decides whether this is a meeting.
+    with_account(&unwrap_redirect(url), account)
+}
 
 const SWEEP: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -85,6 +100,8 @@ enum Msg {
     Menu(String),
     /// Switch between the split layout and everything-in-the-rail.
     Nav(String),
+    /// Turn outbound link rewriting on or off.
+    RewriteLinks(bool),
     /// Set an account's highlight colour.
     Colour { email: String, colour: String },
     /// A page-side script grabbed a download itself (blob or fetch) and handed us
@@ -133,6 +150,7 @@ fn main() -> wry::Result<()> {
         );
         return Ok(());
     }
+    REWRITE_LINKS.store(config.rewrite_links, std::sync::atomic::Ordering::Relaxed);
     let first = config.accounts[0].clone();
 
     // Without a real Edit menu macOS never routes Cmd+C/V/X or Cmd+A into a
@@ -566,6 +584,14 @@ fn main() -> wry::Result<()> {
                 }
             }
 
+            Event::UserEvent(Msg::RewriteLinks(on)) => {
+                let Ok(mut state) = app.try_borrow_mut() else { return };
+                state.config.rewrite_links = on;
+                state.config.save();
+                REWRITE_LINKS.store(on, std::sync::atomic::Ordering::Relaxed);
+                println!("[masse] link rewriting -> {}", if on { "on" } else { "off" });
+            }
+
             Event::UserEvent(Msg::Nav(nav)) => {
                 let (payload, visible) = {
                     let Ok(mut state) = app.try_borrow_mut() else { return };
@@ -961,10 +987,7 @@ fn show(
                         println!("[masse] download link: {}", &url[..url.len().min(120)]);
                         let _ = proxy.send_event(Msg::GrabBlob(url));
                     } else if route_link(&service, &url) != Route::Drop {
-                        // A Meet link clicked in this account's calendar has to say
-                        // which account it belongs to, or the browser opens it as
-                        // whichever Google account it happens to have first.
-                        let _ = proxy.send_event(Msg::External(with_account(&url, &account)));
+                        let _ = proxy.send_event(Msg::External(outbound(&url, &account)));
                     } else {
                         println!("[masse] dropped link: {}", &url[..url.len().min(120)]);
                     }
@@ -998,7 +1021,7 @@ fn show(
                         false
                     }
                     Route::External => {
-                        let _ = proxy.send_event(Msg::External(with_account(&url, &account)));
+                        let _ = proxy.send_event(Msg::External(outbound(&url, &account)));
                         false
                     }
                 }
@@ -1083,6 +1106,7 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
             email: value["email"].as_str().unwrap_or_default().to_string(),
         },
         Some("nav") => Msg::Nav(value["nav"].as_str().unwrap_or_default().to_string()),
+        Some("rewriteLinks") => Msg::RewriteLinks(value["on"].as_bool().unwrap_or(true)),
         Some("color") => Msg::Colour {
             email: value["email"].as_str().unwrap_or_default().to_string(),
             colour: value["color"].as_str().unwrap_or_default().to_string(),
@@ -1532,6 +1556,7 @@ fn rail_state(config: &Config, active: &str) -> String {
         "palette": PALETTE,
         "max_live": config.max_live,
         "idle_minutes": config.idle_minutes,
+        "rewrite_links": config.rewrite_links,
     })
     .to_string()
 }

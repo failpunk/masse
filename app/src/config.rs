@@ -61,6 +61,12 @@ pub struct Config {
     /// away without changing account first.
     #[serde(default = "default_nav")]
     pub nav: String,
+    /// Whether outbound links may be rewritten on their way to the browser: Meet
+    /// links addressed to the account whose calendar they came from, and Google's
+    /// `google.com/url` redirector unwrapped so the real destination is opened
+    /// directly. Off means every link is handed over exactly as the page wrote it.
+    #[serde(default = "default_rewrite_links")]
+    pub rewrite_links: bool,
 }
 
 /// A remembered display, identified well enough to recognise it again after a
@@ -105,6 +111,10 @@ fn default_idle_minutes() -> u64 {
     15
 }
 
+fn default_rewrite_links() -> bool {
+    true
+}
+
 /// Ten suggestions rather than a full colour picker: enough to tell several accounts
 /// apart at a glance, few enough to pick from without deliberating. Ordered
 /// neutral-first so the greys read as the quiet default.
@@ -138,6 +148,7 @@ impl Default for Config {
             monitor: None,
             last: None,
             nav: default_nav(),
+            rewrite_links: default_rewrite_links(),
         }
     }
 }
@@ -262,6 +273,77 @@ fn encode(raw: &str) -> String {
             other => format!("%{other:02X}"),
         })
         .collect()
+}
+
+fn decode(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+                match u8::from_str_radix(hex, 16) {
+                    Ok(byte) => {
+                        out.push(byte);
+                        i += 3;
+                    }
+                    Err(_) => {
+                        out.push(bytes[i]);
+                        i += 1;
+                    }
+                }
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            other => {
+                out.push(other);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Pull the real destination out of a Google redirector.
+///
+/// Gmail and Chat do not store the link you were given; they store
+/// `www.google.com/url?...&url=<the real one>`. Handing that to the browser works,
+/// but it means a click on a link to somebody else's site goes through Google
+/// first. The destination is right there in the query, so unwrap it and go
+/// straight there. Anything that is not one of these redirectors, including a
+/// genuine Google page, comes back unchanged.
+pub fn unwrap_redirect(url: &str) -> String {
+    let Some(host) = host_of(url) else {
+        return url.to_string();
+    };
+    if !matches!(host, "www.google.com" | "google.com") {
+        return url.to_string();
+    }
+    let Some((path, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    if !path.ends_with("/url") {
+        return url.to_string();
+    }
+    // `url=` is what Gmail and Chat use; `q=` is the older form.
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key != "url" && key != "q" {
+            continue;
+        }
+        let target = decode(value);
+        // Only ever hand back a real web address. Without this a crafted
+        // `url=javascript:...` would be passed straight to `open`.
+        if target.starts_with("https://") || target.starts_with("http://") {
+            return target;
+        }
+    }
+    url.to_string()
 }
 
 /// What to do with a navigation a pane is attempting.
@@ -665,6 +747,45 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_redirector_opens_the_real_destination() {
+        // Verbatim from a real click. The link is to vault.buildq.dev; Chat merely
+        // stores it wrapped, and going through Google to reach it is a click Google
+        // does not need to see.
+        assert_eq!(
+            unwrap_redirect(
+                "https://www.google.com/url?sa=j&url=https%3A%2F%2Fvault.buildq.dev%2Fui%2Fvault%2Fdashboard&uct=1785370505&source=chat"
+            ),
+            "https://vault.buildq.dev/ui/vault/dashboard"
+        );
+    }
+
+    #[test]
+    fn the_older_q_form_is_unwrapped_too() {
+        assert_eq!(
+            unwrap_redirect("https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fa%3Fb%3D1"),
+            "https://example.com/a?b=1"
+        );
+    }
+
+    #[test]
+    fn a_real_google_page_is_not_mistaken_for_a_redirector() {
+        for url in [
+            "https://www.google.com/search?q=https://example.com",
+            "https://meet.google.com/abc-defg-hij",
+            "https://calendar.google.com/calendar/u/0/r",
+        ] {
+            assert_eq!(unwrap_redirect(url), url);
+        }
+    }
+
+    #[test]
+    fn a_redirector_cannot_smuggle_a_non_web_scheme() {
+        // Without the scheme check this would hand `open` a javascript: URL.
+        let nasty = "https://www.google.com/url?url=javascript%3Aalert(1)";
+        assert_eq!(unwrap_redirect(nasty), nasty);
+    }
+
+    #[test]
     fn a_google_link_that_is_not_a_meeting_is_left_alone() {
         // Gmail and Chat wrap outbound links in this redirector. It is a Google
         // host, but the destination is somebody else's site, so sending it through
@@ -853,6 +974,24 @@ mod tests {
     }
 
     #[test]
+    fn an_existing_config_without_the_setting_keeps_rewriting() {
+        // Everyone already has an accounts.json with no such field. Defaulting to
+        // false would silently turn the feature off for them on upgrade.
+        let old = r#"{"accounts":[{"email":"a@b.com"}]}"#;
+        let config: Config = serde_json::from_str(old).expect("parses");
+        assert!(config.rewrite_links);
+    }
+
+    #[test]
+    fn turning_rewriting_off_survives_a_save_and_load() {
+        let mut config = Config::default();
+        config.rewrite_links = false;
+        let round: Config =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).expect("parses");
+        assert!(!round.rewrite_links);
+    }
+
+    #[test]
     fn lookup_ignores_case_and_padding() {
         let config = Config {
             accounts: vec![account("One", "One@Gmail.com")],
@@ -862,6 +1001,7 @@ mod tests {
             monitor: None,
             last: None,
             nav: default_nav(),
+            rewrite_links: default_rewrite_links(),
         };
         assert!(config.find(" one@gmail.COM ").is_some());
         assert!(config.find("other@gmail.com").is_none());
