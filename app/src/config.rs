@@ -349,6 +349,48 @@ pub fn is_download(url: &str) -> bool {
         || url.contains("export=download")
 }
 
+/// Whether `?authuser=` means anything to this host.
+///
+/// Google honours it across its apps, so a Meet link opened from account B's
+/// calendar can say which account it belongs to. `accounts.google.com` is
+/// excluded: that is the sign-in flow itself, and it carries its own account
+/// selection which this must not fight with.
+fn honours_authuser(host: &str) -> bool {
+    is_google_owned(host) && host != "accounts.google.com"
+}
+
+/// Stamp the owning account onto an outbound Google URL.
+///
+/// Without this, handing a Meet link to the browser lands on whichever account
+/// the browser happens to have first, which for anyone signed into several is
+/// usually the wrong one. Non-Google links are returned untouched: `authuser` is
+/// Google's parameter and appending it to somebody else's URL is noise at best.
+pub fn with_account(url: &str, email: &str) -> String {
+    let Some(host) = host_of(url) else {
+        return url.to_string();
+    };
+    if !honours_authuser(host) {
+        return url.to_string();
+    }
+    // Already addressed, by us or by Google. Leave it alone.
+    if url.contains("authuser=") {
+        return url.to_string();
+    }
+    // The parameter has to go in the query, which ends where the fragment
+    // begins. Appending blindly would bury it inside Gmail's #inbox/... instead.
+    let (before, fragment) = match url.split_once('#') {
+        Some((before, fragment)) => (before, Some(fragment)),
+        None => (url, None),
+    };
+    let separator = if before.contains('?') { '&' } else { '?' };
+    let mut out = format!("{before}{separator}authuser={}", encode(email));
+    if let Some(fragment) = fragment {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    out
+}
+
 pub fn route_link(_service: &str, url: &str) -> Route {
     match host_of(url) {
         Some(host) if is_tracker(host) => Route::Drop,
@@ -550,6 +592,57 @@ mod tests {
         }
         // A third-party frame still leaves.
         assert_eq!(route("mail", "https://example.com/tracking-frame"), Route::External);
+    }
+
+    #[test]
+    fn a_meet_link_carries_the_account_it_was_opened_from() {
+        assert_eq!(
+            with_account("https://meet.google.com/abc-defg-hij", "b@work.com"),
+            "https://meet.google.com/abc-defg-hij?authuser=b%40work.com"
+        );
+    }
+
+    #[test]
+    fn an_existing_query_gets_the_account_appended_not_replaced() {
+        assert_eq!(
+            with_account("https://meet.google.com/abc?hs=1", "b@work.com"),
+            "https://meet.google.com/abc?hs=1&authuser=b%40work.com"
+        );
+    }
+
+    #[test]
+    fn the_account_goes_in_the_query_not_inside_the_fragment() {
+        // Appending blindly would produce "#inbox?authuser=...", which Gmail
+        // reads as part of the fragment and ignores.
+        assert_eq!(
+            with_account("https://mail.google.com/mail/u/0/#inbox", "b@work.com"),
+            "https://mail.google.com/mail/u/0/?authuser=b%40work.com#inbox"
+        );
+    }
+
+    #[test]
+    fn a_link_that_already_names_an_account_is_left_alone() {
+        let already = "https://meet.google.com/abc?authuser=a%40home.com";
+        assert_eq!(with_account(already, "b@work.com"), already);
+    }
+
+    #[test]
+    fn a_non_google_meeting_link_is_never_rewritten() {
+        for url in [
+            "https://us02web.zoom.us/j/1234567890",
+            "https://teams.microsoft.com/l/meetup-join/x",
+            "https://example.com/standup",
+        ] {
+            assert_eq!(with_account(url, "b@work.com"), url);
+        }
+    }
+
+    #[test]
+    fn the_sign_in_flow_is_never_given_an_account_param() {
+        // accounts.google.com does its own account selection; a stray authuser
+        // here fights the login it is in the middle of.
+        let signin = "https://accounts.google.com/ServiceLogin?service=mail";
+        assert_eq!(with_account(signin, "b@work.com"), signin);
     }
 
     #[test]

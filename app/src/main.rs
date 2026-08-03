@@ -26,7 +26,7 @@ use wry::{
 
 use config::{
     expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
-    is_download, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
+    is_download, with_account, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
 use ui::{RAIL_W, TOPBAR_H};
@@ -79,9 +79,6 @@ enum Msg {
     Reload,
     /// Hand a URL to the real browser instead of showing it in a pane.
     External(String),
-    /// Load a URL in the visible pane. Used for downloads, which have to stay in the
-    /// app: WebKit only turns a response into a download if it makes the request.
-    LoadHere(String),
     /// Test hook: make the visible pane attempt a navigation.
     Drive(String),
     /// A menu item fired. Carries muda's item id.
@@ -628,13 +625,6 @@ fn main() -> wry::Result<()> {
                 }
             }
 
-            Event::UserEvent(Msg::LoadHere(url)) => {
-                let Ok(state) = app.try_borrow() else { return };
-                if let Some(view) = state.panes.get(&state.active) {
-                    let _ = view.load_url(&url);
-                }
-            }
-
             Event::UserEvent(Msg::SaveBlob { name, data }) => {
                 let Some(bytes) = b64_decode(&data) else {
                     eprintln!("[masse] blob save: could not decode {name}");
@@ -961,16 +951,20 @@ fn show(
             .with_new_window_req_handler({
                 let proxy = proxy.clone();
                 let service = service.to_string();
+                let account = email.to_string();
                 move |url, _features| {
-                    // An attachment opens as a new window too. Denying it means the
-                    // request is never made and nothing downloads; sending it to the
-                    // browser means signing in again there. So it goes to the pane,
-                    // where WebKit sees the attachment response and downloads it.
+                    // Some download links open as a new window. Handing them to the
+                    // browser means signing in again there, and loading them in the
+                    // pane only renders them, so they take the same route as a
+                    // download navigation: fetched in the page, saved natively.
                     if is_download(&url) {
                         println!("[masse] download link: {}", &url[..url.len().min(120)]);
-                        let _ = proxy.send_event(Msg::LoadHere(url));
+                        let _ = proxy.send_event(Msg::GrabBlob(url));
                     } else if route_link(&service, &url) != Route::Drop {
-                        let _ = proxy.send_event(Msg::External(url));
+                        // A Meet link clicked in this account's calendar has to say
+                        // which account it belongs to, or the browser opens it as
+                        // whichever Google account it happens to have first.
+                        let _ = proxy.send_event(Msg::External(with_account(&url, &account)));
                     } else {
                         println!("[masse] dropped link: {}", &url[..url.len().min(120)]);
                     }
@@ -981,6 +975,7 @@ fn show(
             .with_navigation_handler({
                 let proxy = proxy.clone();
                 let service = service.to_string();
+                let account = email.to_string();
                 move |url| match route(&service, &url) {
                     Route::Stay => {
                         // Gmail's download button navigates (in a hidden frame) to
@@ -1003,7 +998,7 @@ fn show(
                         false
                     }
                     Route::External => {
-                        let _ = proxy.send_event(Msg::External(url));
+                        let _ = proxy.send_event(Msg::External(with_account(&url, &account)));
                         false
                     }
                 }
@@ -1131,12 +1126,6 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
     }
     if value["type"] == "jslog" {
         println!("[js] {}", value["msg"].as_str().unwrap_or_default());
-        return;
-    }
-    if value["type"] == "downloadUrl" {
-        let Some(url) = value["url"].as_str() else { return };
-        println!("[masse] page-caught download url: {}", &url[..url.len().min(120)]);
-        let _ = proxy.send_event(Msg::LoadHere(url.to_string()));
         return;
     }
     if value["type"] == "save" {
@@ -1550,26 +1539,18 @@ fn rail_state(config: &Config, active: &str) -> String {
 
 const PROBE: &str = r#"
 (() => {
-  // Gmail/Drive's download icons never reach wry's navigation hooks: the click
-  // is handled entirely in page JS (fetch + blob + a synthetic <a download>),
-  // both for the attachment-chip icon and the preview/"print window" overlay's
-  // icon. So downloads are caught here, at the click, instead of relying on
-  // WebKit to notice a response and turn it into a native download.
-  function isDownloadHref(href) {
-    if (!href) return false;
-    if (href.startsWith('blob:')) return true;
-    if (/[?&](view=att|export=download)(&|$)/.test(href)) return true;
-    try {
-      const host = new URL(href, location.href).hostname;
-      if (host === 'mail-attachment.googleusercontent.com' || host === 'drive.usercontent.google.com') return true;
-      if (host.endsWith('.googleusercontent.com') && href.includes('/download')) return true;
-    } catch (e) {}
-    return false;
-  }
-  function nameFor(anchor, url, disposition) {
-    if (anchor && anchor.hasAttribute('download') && anchor.getAttribute('download')) {
-      return anchor.getAttribute('download');
-    }
+  // Downloads. Gmail's download control is a <button>, not a link, so there is
+  // no anchor to intercept; what it does is navigate (in a hidden frame) to the
+  // attachment URL and expect the browser to save the response. WebKit only
+  // turns a response into a download when it cannot display the MIME type, so a
+  // JPEG or a PDF rendered into nowhere and the click looked dead.
+  //
+  // The Rust side cancels that navigation and calls back into __masseGrab, which
+  // fetches the bytes here (same origin, credentials attached, redirects
+  // followed) and posts them over IPC to be written to ~/Downloads. Catching it
+  // at the navigation rather than the click means every surface works the same
+  // way: the attachment chip, the preview overlay, and Drive.
+  function nameFor(url, disposition) {
     if (disposition) {
       const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
       if (m) { try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; } }
@@ -1587,86 +1568,21 @@ const PROBE: &str = r#"
     } catch (e) {}
     return 'download';
   }
-  function grabBlob(url, anchor, forcedName) {
+  // Called from the Rust side when a download navigation was cancelled.
+  window.__masseGrab = (url) => {
     fetch(url, { credentials: 'include' })
       .then((r) => r.blob().then((blob) => ({ blob, disposition: r.headers.get('content-disposition') })))
       .then(({ blob, disposition }) => {
         const reader = new FileReader();
         reader.onload = () => {
           window.ipc.postMessage(JSON.stringify({
-            type: 'save', name: forcedName || nameFor(anchor, url, disposition), data: reader.result,
+            type: 'save', name: nameFor(url, disposition), data: reader.result,
           }));
         };
         reader.readAsDataURL(blob);
       })
       .catch((e) => window.ipc.postMessage(JSON.stringify({ type: 'jslog', msg: 'download fetch failed: ' + e })));
-  }
-  // Called from the Rust side when a download navigation was cancelled.
-  window.__masseGrab = (url) => grabBlob(url, null, null);
-  // Gmail's download control is a <button aria-label="Download attachment X">,
-  // not a link, and the URL lives on the surrounding attachment card in a
-  // `download_url` attribute shaped "mime:name:url". Nothing about this click
-  // ever becomes a navigation wry can see, so it has to be caught here.
-  function attachmentDownload(el) {
-    let node = el;
-    for (let i = 0; node && i < 12; i++) {
-      const label = node.getAttribute && node.getAttribute('aria-label');
-      if (label && /^Download\b/i.test(label)) {
-        // Found the button. The card holding the URL is somewhere above it.
-        let card = node;
-        for (let j = 0; card && j < 12; j++) {
-          const holder = card.querySelector ? card.querySelector('[download_url]') : null;
-          const own = card.getAttribute && card.getAttribute('download_url');
-          const raw = own || (holder && holder.getAttribute('download_url'));
-          if (raw) {
-            // "image/jpeg:Attachment0.jpeg:https://mail.google.com/..."
-            const first = raw.indexOf(':');
-            const second = raw.indexOf(':', first + 1);
-            if (second > -1) {
-              return { url: raw.slice(second + 1), name: raw.slice(first + 1, second) };
-            }
-          }
-          card = card.parentElement;
-        }
-        // The button is there but the card is not shaped as expected. Let the
-        // click through: the navigation it triggers is caught on the Rust side.
-        return null;
-      }
-      node = node.parentElement;
-    }
-    return null;
-  }
-  document.addEventListener('click', (event) => {
-    const attachment = attachmentDownload(event.target);
-    if (attachment) {
-      event.preventDefault();
-      event.stopPropagation();
-      grabBlob(attachment.url, null, attachment.name);
-      return;
-    }
-    let el = event.target;
-    while (el && el !== document.body) {
-      if (el.tagName === 'A' && el.href) {
-        if (el.href.startsWith('blob:')) {
-          event.preventDefault();
-          event.stopPropagation();
-          grabBlob(el.href, el);
-        } else if (el.hasAttribute('download') || isDownloadHref(el.href)) {
-          event.preventDefault();
-          event.stopPropagation();
-          // Loading this URL in the pane (the old approach) never produced a
-          // real file: WebKit's download delegate does not fire for a plain
-          // load_url() navigation the way it does for a new-window request.
-          // Fetching and saving the bytes ourselves does not depend on that
-          // delegate at all, and this URL is same-origin with the page, so
-          // there is no CORS obstacle to the fetch.
-          grabBlob(el.href, el);
-        }
-        break;
-      }
-      el = el.parentElement;
-    }
-  }, true);
+  };
 })();
 window.addEventListener('load', () => {
   const find = () => {

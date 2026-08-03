@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.15.0
+- **Meeting links open as the right account.** A Meet link carries no account, so
+  the browser resolves it against whichever Google account it happens to have
+  first, which for anyone running meetings from several accounts is usually the
+  wrong one. Google's own calendar behaves this way too. Masse knows which
+  account's calendar the click came from, so it now stamps `authuser=` onto
+  outbound Google links on the way out. Non-Google links are untouched, because
+  `authuser` is Google's parameter and means nothing to Zoom. The sign-in host is
+  excluded so this cannot fight a login in progress. This only helps if the
+  browser is already signed into that account; otherwise `authuser` lands on a
+  sign-in page rather than guessing.
+- **One download path instead of three.** 0.14.2 caught downloads three ways: the
+  cancelled navigation, a click interceptor reading a `download_url` attribute off
+  Gmail's attachment card, and loading the URL into the visible pane. Only the
+  first ever fired. The click interceptor never matched current Gmail markup, and
+  loading the URL into the pane is what took over the whole window and left a pane
+  with no way back to the inbox. Both are gone. What remains is the cancelled
+  navigation, which covers every surface (the attachment chip, the preview
+  overlay, Drive) precisely because it hooks the navigation rather than any
+  particular button.
+- Verified end to end rather than by inspection: a downloaded attachment's SHA-256
+  matches the same file fetched by a real browser, and the page-side
+  fetch-and-encode step now has its own test, since it lives in a string literal
+  the Rust compiler never checks.
+
 ## 0.14.2
 - **Attachment downloads work.** Clicking Gmail's download icon did nothing at
   all. The click does reach WebKit as a navigation to the attachment URL, but wry
