@@ -359,12 +359,19 @@ fn honours_authuser(host: &str) -> bool {
     is_google_owned(host) && host != "accounts.google.com"
 }
 
-/// Stamp the owning account onto an outbound Google URL.
+/// Address an outbound Google URL to the account it belongs to.
 ///
 /// Without this, handing a Meet link to the browser lands on whichever account
 /// the browser happens to have first, which for anyone signed into several is
-/// usually the wrong one. Non-Google links are returned untouched: `authuser` is
-/// Google's parameter and appending it to somebody else's URL is noise at best.
+/// usually the wrong one. Non-Google links are returned untouched.
+///
+/// `authuser` alone is not enough, which took two releases to learn. Google emits
+/// `authuser=1` on its own Calendar links: an index, assigned per session, so the
+/// browser resolves it against its own ordering and opens somebody else's
+/// account. Replacing that index with the address is necessary but still not
+/// sufficient, because Meet ignores the address form. The account chooser is what
+/// actually works: it resolves the address server-side and then redirects, so the
+/// session is already the right one before Meet sees the request.
 pub fn with_account(url: &str, email: &str) -> String {
     let Some(host) = host_of(url) else {
         return url.to_string();
@@ -372,18 +379,54 @@ pub fn with_account(url: &str, email: &str) -> String {
     if !honours_authuser(host) {
         return url.to_string();
     }
-    // Already addressed, by us or by Google. Leave it alone.
-    if url.contains("authuser=") {
-        return url.to_string();
-    }
+    // Both mechanisms, because the chooser is what resolves the session and the
+    // parameter states the intent for whatever reads it afterwards.
+    let inner = stamp_authuser(url, email);
+    format!(
+        "https://accounts.google.com/AccountChooser?Email={}&continue={}",
+        encode(email),
+        encode(&inner)
+    )
+}
+
+/// Put `authuser=<address>` in a URL's query, replacing Google's session index if
+/// one is already there.
+fn stamp_authuser(url: &str, email: &str) -> String {
     // The parameter has to go in the query, which ends where the fragment
     // begins. Appending blindly would bury it inside Gmail's #inbox/... instead.
     let (before, fragment) = match url.split_once('#') {
         Some((before, fragment)) => (before, Some(fragment)),
         None => (url, None),
     };
-    let separator = if before.contains('?') { '&' } else { '?' };
-    let mut out = format!("{before}{separator}authuser={}", encode(email));
+    let (path, query) = match before.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (before, None),
+    };
+
+    let mut params: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for pair in query.unwrap_or_default().split('&').filter(|p| !p.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key != "authuser" {
+            params.push(pair.to_string());
+            continue;
+        }
+        // Google writes its own account index here: `authuser=1` off a Calendar
+        // event. That index is assigned per session, so the browser resolves it
+        // against ITS ordering, not ours, and lands on somebody else's account.
+        // An index gets replaced; an address is already unambiguous, so it stays.
+        if value.contains('@') || value.contains("%40") {
+            params.push(pair.to_string());
+        } else {
+            params.push(format!("authuser={}", encode(email)));
+        }
+        replaced = true;
+    }
+    if !replaced {
+        params.push(format!("authuser={}", encode(email)));
+    }
+
+    let mut out = format!("{path}?{}", params.join("&"));
     if let Some(fragment) = fragment {
         out.push('#');
         out.push_str(fragment);
@@ -595,19 +638,44 @@ mod tests {
     }
 
     #[test]
-    fn a_meet_link_carries_the_account_it_was_opened_from() {
+    fn a_meet_link_goes_through_the_account_chooser() {
+        // The chooser resolves the address server-side and then redirects, which is
+        // the only mechanism that actually landed on the right account. authuser
+        // alone, in either form, did not.
         assert_eq!(
             with_account("https://meet.google.com/abc-defg-hij", "b@work.com"),
-            "https://meet.google.com/abc-defg-hij?authuser=b%40work.com"
+            "https://accounts.google.com/AccountChooser?Email=b%40work.com\
+             &continue=https%3A%2F%2Fmeet.google.com%2Fabc-defg-hij%3Fauthuser%3Db%2540work.com"
+                .replace(' ', "")
+                .as_str()
         );
     }
 
     #[test]
-    fn an_existing_query_gets_the_account_appended_not_replaced() {
-        assert_eq!(
-            with_account("https://meet.google.com/abc?hs=1", "b@work.com"),
-            "https://meet.google.com/abc?hs=1&authuser=b%40work.com"
-        );
+    fn the_continue_target_is_fully_escaped() {
+        // A continue= value that leaks a raw & or = would truncate the outer URL and
+        // send the browser somewhere else entirely.
+        let out = with_account("https://meet.google.com/abc?hs=1&x=2", "b@work.com");
+        let (_, continues) = out.split_once("&continue=").expect("continue param");
+        assert!(!continues.contains('&'), "unescaped & in {continues}");
+        assert!(!continues.contains('='), "unescaped = in {continues}");
+    }
+
+    #[test]
+    fn a_non_google_meeting_link_never_goes_near_the_chooser() {
+        for url in [
+            "https://us02web.zoom.us/j/1234567890",
+            "https://teams.microsoft.com/l/meetup-join/x",
+        ] {
+            assert_eq!(with_account(url, "b@work.com"), url);
+        }
+    }
+
+    #[test]
+    fn the_chooser_itself_is_never_wrapped_again() {
+        // Without this, every pass would nest another chooser around the last.
+        let once = with_account("https://meet.google.com/abc", "b@work.com");
+        assert_eq!(with_account(&once, "b@work.com"), once);
     }
 
     #[test]
@@ -615,15 +683,46 @@ mod tests {
         // Appending blindly would produce "#inbox?authuser=...", which Gmail
         // reads as part of the fragment and ignores.
         assert_eq!(
-            with_account("https://mail.google.com/mail/u/0/#inbox", "b@work.com"),
+            stamp_authuser("https://mail.google.com/mail/u/0/#inbox", "b@work.com"),
             "https://mail.google.com/mail/u/0/?authuser=b%40work.com#inbox"
         );
     }
 
     #[test]
-    fn a_link_that_already_names_an_account_is_left_alone() {
+    fn a_link_that_already_names_an_account_keeps_it() {
         let already = "https://meet.google.com/abc?authuser=a%40home.com";
-        assert_eq!(with_account(already, "b@work.com"), already);
+        assert_eq!(stamp_authuser(already, "b@work.com"), already);
+    }
+
+    #[test]
+    fn googles_own_account_index_is_replaced_by_the_address() {
+        // Verbatim shape of what Calendar hands over, from a real click. The index
+        // is assigned per session, so the browser resolves `1` against its own
+        // ordering and opens the wrong account. Only an address survives the trip.
+        assert_eq!(
+            stamp_authuser(
+                "https://meet.google.com/zjr-hjkq-oma?authuser=1&hs=122&ijlm=1785777359027",
+                "b@work.com"
+            ),
+            "https://meet.google.com/zjr-hjkq-oma?authuser=b%40work.com&hs=122&ijlm=1785777359027"
+        );
+    }
+
+    #[test]
+    fn an_index_is_replaced_wherever_it_sits_in_the_query() {
+        assert_eq!(
+            stamp_authuser("https://meet.google.com/abc?hs=1&authuser=2", "b@work.com"),
+            "https://meet.google.com/abc?hs=1&authuser=b%40work.com"
+        );
+    }
+
+    #[test]
+    fn a_parameter_merely_ending_in_authuser_is_not_mistaken_for_it() {
+        // Substring matching on "authuser=" would rewrite this one too.
+        assert_eq!(
+            stamp_authuser("https://meet.google.com/abc?notauthuser=1", "b@work.com"),
+            "https://meet.google.com/abc?notauthuser=1&authuser=b%40work.com"
+        );
     }
 
     #[test]

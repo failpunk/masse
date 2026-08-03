@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.2
+- **Meeting links really do open as the right account now.** 0.15.0 claimed this
+  and was wrong, twice over, so here is what actually goes wrong and what fixes
+  it. Google puts `authuser=1` on its own Calendar links. That is a session
+  *index*, assigned per session, so the browser resolves `1` against its own
+  ordering of accounts and opens whichever one happens to sit there: the exact
+  symptom. Replacing the index with the email address is necessary but still not
+  enough, because Meet ignores the address form of `authuser`. What works is
+  Google's account chooser, which resolves the address server-side and redirects
+  with the session already correct, so outbound Google links are now wrapped in
+  it. Verified by clicking a real Meet invite, not by reasoning about it.
+- Non-Google links (Zoom, Teams) are untouched, and a chooser URL is never
+  wrapped in a second chooser.
+- Still true, and not fixable from here: this only chooses between accounts the
+  browser is already signed into. It cannot create a session, so an account the
+  browser has never seen lands on a sign-in page.
+
 ## 0.15.0
 - **Meeting links open as the right account.** A Meet link carries no account, so
   the browser resolves it against whichever Google account it happens to have
