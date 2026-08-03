@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.3
+- **Only meeting links get addressed to an account.** 0.15.2 rewrote every
+  Google-owned link, and Gmail and Chat wrap *every* outbound link in a
+  `www.google.com/url?...` redirector. That host is Google's, so a link to Loom
+  was being sent through Google's account chooser on its way out: pointless, and
+  it handed the destination to a sign-in flow that had no business seeing it. The
+  rule is now the one host where the answer actually matters, `meet.google.com`.
+  Docs, Drive, Gmail and search links open wherever the browser opens them.
+
 ## 0.15.2
 - **Meeting links really do open as the right account now.** 0.15.0 claimed this
   and was wrong, twice over, so here is what actually goes wrong and what fixes

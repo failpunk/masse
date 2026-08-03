@@ -349,14 +349,17 @@ pub fn is_download(url: &str) -> bool {
         || url.contains("export=download")
 }
 
-/// Whether `?authuser=` means anything to this host.
+/// Whether this is a Google *meeting* link, and so worth addressing to a
+/// particular account.
 ///
-/// Google honours it across its apps, so a Meet link opened from account B's
-/// calendar can say which account it belongs to. `accounts.google.com` is
-/// excluded: that is the sign-in flow itself, and it carries its own account
-/// selection which this must not fight with.
-fn honours_authuser(host: &str) -> bool {
-    is_google_owned(host) && host != "accounts.google.com"
+/// Deliberately one host rather than "anything Google owns". Gmail and Chat wrap
+/// every outbound link in a `www.google.com/url?...` redirector, which is
+/// Google-owned but is on its way to somebody else's site entirely: routing a
+/// Loom link through the account chooser is both pointless and a privacy leak,
+/// since it hands the destination to Google's sign-in flow. Joining a meeting is
+/// the one case where which account you arrive as actually matters.
+fn is_meeting_link(host: &str) -> bool {
+    host == "meet.google.com"
 }
 
 /// Address an outbound Google URL to the account it belongs to.
@@ -376,7 +379,7 @@ pub fn with_account(url: &str, email: &str) -> String {
     let Some(host) = host_of(url) else {
         return url.to_string();
     };
-    if !honours_authuser(host) {
+    if !is_meeting_link(host) {
         return url.to_string();
     }
     // Both mechanisms, because the chooser is what resolves the session and the
@@ -659,6 +662,29 @@ mod tests {
         let (_, continues) = out.split_once("&continue=").expect("continue param");
         assert!(!continues.contains('&'), "unescaped & in {continues}");
         assert!(!continues.contains('='), "unescaped = in {continues}");
+    }
+
+    #[test]
+    fn a_google_link_that_is_not_a_meeting_is_left_alone() {
+        // Gmail and Chat wrap outbound links in this redirector. It is a Google
+        // host, but the destination is somebody else's site, so sending it through
+        // the account chooser is pointless and leaks where you are going.
+        let loom = "https://www.google.com/url?sa=j&url=https%3A%2F%2Fwww.loom.com%2Fshare%2Feaf2d099fe9f427e854bcea4a07f8e1b&uct=1785370505&source=chat";
+        assert_eq!(with_account(loom, "b@work.com"), loom);
+    }
+
+    #[test]
+    fn only_meetings_are_addressed_not_every_google_app() {
+        // Docs, Drive and Gmail links open wherever the browser opens them. Rewriting
+        // those was too broad a rule and caught the redirector above.
+        for url in [
+            "https://docs.google.com/document/d/x/edit",
+            "https://drive.google.com/file/d/x/view",
+            "https://mail.google.com/mail/u/0/#inbox",
+            "https://www.google.com/search?q=x",
+        ] {
+            assert_eq!(with_account(url, "b@work.com"), url);
+        }
     }
 
     #[test]
