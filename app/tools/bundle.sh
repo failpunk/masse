@@ -148,8 +148,11 @@ if [ -d ../site ]; then
   # Stamp the version wherever the page states it, so the page can never claim a
   # different build than the zip beside it. Scoped to data-version lines only.
   if [ -f ../site/index.html ]; then
-    sed -i '' -E "/data-version/s/[0-9]+\.[0-9]+\.[0-9]+/$VERSION/" ../site/index.html \
-      && echo "[bundle] stamped v$VERSION into ../site/index.html"
+    sed -i '' -E "/data-version/s/[0-9]+\.[0-9]+\.[0-9]+/$VERSION/" ../site/index.html
+    # The structured data states a version too. Left unstamped it would describe
+    # a build that is no longer the one being offered.
+    sed -i '' -E "/\"softwareVersion\"/s/[0-9]+\.[0-9]+\.[0-9]+/$VERSION/" ../site/index.html
+    echo "[bundle] stamped v$VERSION into ../site/index.html"
   fi
 fi
 

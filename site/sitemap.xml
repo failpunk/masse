@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One page, so one entry. changefreq and priority are omitted deliberately:
+     Google ignores both, and a lastmod that is not maintained is worse than
+     none, because a stale date tells crawlers not to bother re-reading. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.masseapp.com/</loc>
+  </url>
+</urlset>
