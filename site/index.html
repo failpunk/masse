@@ -45,9 +45,7 @@
     --rule:1px solid #2a2f36; --rule-soft:1px solid #1c2027;
     --ease:cubic-bezier(.22,1,.36,1); --dur:160ms;
     --grid:rgba(241,242,244,.075); --grid-step:48px; --glow:rgba(43,91,255,.12);
-    --figure-rule:1px solid #4a525d; --figure-surface:#1b2027; --figure-rim:rgba(255,255,255,.09);
-    --figure-halo:rgba(43,91,255,.22); --figure-bloom:0 0 140px rgba(43,91,255,.20);
-    --figure-inset:var(--s5); --demo-step:2600ms; --demo-fade:320ms;
+    --figure-halo:rgba(43,91,255,.22);
   }
   *,*::before,*::after{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -95,55 +93,98 @@
     transition:transform var(--dur) var(--ease);
   }
   .cta:hover{transform:translateY(-2px)}
-  .firstrun{margin:var(--s4) 0 0; font-size:13px; color:var(--ink-soft); max-width:44ch}
 
-  /* The one figure: a replica of the app's own chrome */
+  /* The hero figure: three accounts, three windows, one app.
+     A conceptual picture of what the app is for, not a screenshot of it.
+
+     Every dimension is a whole pixel, and nothing holding text is scaled or
+     blurred. transform:scale() on a text layer makes the browser rasterise once
+     and then resample, which is what made an earlier version look soft. Depth
+     comes from stagger, shadow, and a scrim painted over the windows behind.
+
+     The radii and the title-bar gradient are a deliberate exception to the
+     radius-0, no-gradient rules: they sit INSIDE the depicted window, where they
+     describe macOS rather than style the page. See DESIGN_SYSTEM.md. */
   figure{margin:0; border-top:var(--rule); padding:var(--s8) 0}
-  /* The figure carries the page, so it gets a halo and a brighter rule than anything
-     else. The only place light lifts a surface. */
-  .app-halo{position:relative; padding:var(--figure-inset)}
-  .app-halo::before{
+  .fan{
+    --cw:534px; --ch:338px; --ox:62px; --oy:80px;
+    position:relative; height:calc(var(--ch) + var(--oy) * 2);
+  }
+  .fan::before{
     content:''; position:absolute; inset:0;
-    background:radial-gradient(65% 75% at 50% 40%, var(--figure-halo), transparent 70%);
+    background:radial-gradient(56% 62% at 54% 50%, var(--figure-halo), transparent 72%);
     pointer-events:none;
   }
-  .app{
-    border:var(--figure-rule); background:var(--figure-surface); display:flex;
-    height:400px; overflow:hidden; position:relative; z-index:1;
-    box-shadow:var(--figure-bloom), inset 0 1px 0 var(--figure-rim);
+  .win{
+    position:absolute; width:var(--cw); height:var(--ch); overflow:hidden;
+    display:flex; flex-direction:column; border-radius:8px;
+    background:#fff; border:1px solid #454e59;
+    box-shadow:0 34px 74px rgba(0,0,0,.66), 0 2px 6px rgba(0,0,0,.4);
+    left:calc((100% - (var(--cw) + var(--ox) * 2)) / 2);
   }
-  .rail{
-    width:64px; flex:none; background:#12161b; border-right:1px solid #262c34; display:flex; flex-direction:column;
-    align-items:center; gap:14px; padding:var(--s3) 0;
+  .win .bar{
+    height:38px; flex:none; display:flex; align-items:center; gap:9px;
+    padding:0 13px; border-bottom:1px solid #252b33;
+    background:linear-gradient(#20262e,#171c23);
   }
-  .face{width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
-        font-family:var(--font-display); font-weight:900; font-size:13px; color:#fff;
-        opacity:.45; filter:saturate(.65)}
-  /* Mirrors the app's selected state, so the figure is not lying about the product. */
-  .face.on{opacity:1; filter:none; box-shadow:0 0 0 3px #12161b, 0 0 0 5px var(--ink)}
-  .app-main{flex:1; min-width:0; display:flex; flex-direction:column}
-  .tabs{height:44px; flex:none; background:#12161b; border-bottom:1px solid #262c34; display:flex; align-items:center; gap:var(--s1); padding:0 var(--s3)}
-  .tab{font-size:12px; color:#8d939c; padding:6px 12px; font-family:var(--font-body)}
-  .tab.on{background:var(--ink); color:#0b0d0f; font-weight:500}
-  .screen{flex:1; background:var(--screen); position:relative; overflow:hidden}
-  .pane{
-    position:absolute; inset:0; padding:var(--s5); opacity:0;
-    transition:opacity var(--demo-fade) var(--ease);
+  .win .lights{display:flex; gap:7px; margin-right:6px}
+  .win .light{width:10px; height:10px; border-radius:50%; flex:none}
+  .win .who{
+    width:20px; height:20px; border-radius:50%; display:grid; place-items:center;
+    font-family:var(--font-display); font-weight:900; font-size:8px; color:#fff;
+    box-shadow:0 0 0 2px rgba(255,255,255,.13);
   }
-  .pane.on{opacity:1}
-  .pane[data-pane="mail"]{display:flex; flex-direction:column; gap:var(--s3)}
-  .line{height:9px; background:#e6e8eb}
-  .line.dark{background:#c9ccd1}
-  /* Calendar: five day columns with a few event blocks. */
-  .cal{position:relative; height:100%; display:grid; grid-template-columns:repeat(5,1fr); gap:var(--s2)}
-  .cal span{background:#f1f2f4; border-top:2px solid #e0e2e6}
-  .cal i{position:absolute; width:calc(20% - var(--s2)); background:var(--accent); opacity:.75; border-radius:2px}
-  /* Drive: rows of a file square and a name. */
-  .files{display:flex; flex-direction:column; gap:var(--s4)}
-  .files div{display:flex; align-items:center; gap:var(--s3)}
-  .files b{width:18px; height:18px; flex:none; background:#d7dae0}
-  .files span{height:9px; background:#e6e8eb}
+  .win .label{font-size:12px; color:#dfe3e8; font-weight:500; letter-spacing:-.01em}
+  .win .count{
+    margin-left:auto; font-family:var(--font-mono); font-size:10px; color:#cdd3da;
+    background:rgba(255,255,255,.10); padding:2px 7px; border-radius:9px;
+  }
+  .win .tool{
+    height:40px; flex:none; display:flex; align-items:center; gap:9px;
+    padding:0 13px; background:#f4f6f8; border-bottom:1px solid #e4e8ed;
+  }
+  .win .search{
+    flex:1; min-width:0; height:24px; border-radius:5px; background:#fff;
+    border:1px solid #dfe4ea; display:flex; align-items:center; gap:7px; padding:0 9px;
+  }
+  .win .search svg{width:11px; height:11px; flex:none; stroke:#9aa2ac; fill:none; stroke-width:1.7}
+  .win .search span{font-size:11px; color:#a2aab4; white-space:nowrap}
+  .win .apps{display:flex; gap:3px; flex:none}
+  .win .chip{font-size:10px; color:#69727d; padding:3px 8px; border-radius:5px}
+  .win .chip.on{background:#e7ebf1; color:#1d2530; font-weight:500}
+  .win .body{flex:1; background:#fff; overflow:hidden}
+  .win .r{
+    display:grid; grid-template-columns:5px 24px 104px 1fr 34px; align-items:center; gap:10px;
+    padding:0 13px; height:52px; border-bottom:1px solid #eef1f4; position:relative;
+  }
+  .win .r:last-child{border-bottom:0}
+  .win .r.sel{background:#f3f6fe}
+  .win .r.sel::before{content:''; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--accent)}
+  .win .r .d{width:5px; height:5px; border-radius:50%; background:var(--accent)}
+  .win .r.read .d{background:transparent}
+  .win .av{
+    width:24px; height:24px; border-radius:50%; display:grid; place-items:center;
+    font-family:var(--font-display); font-weight:900; font-size:9px; color:#fff;
+  }
+  .win .r .f{font-size:12px; color:#12171d; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .win .r.read .f{font-weight:400; color:#5d6570}
+  .win .r .s{font-size:12px; color:#68707b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .win .r .s b{color:#12171d; font-weight:500}
+  .win .r.read .s b{font-weight:400; color:#4d545e}
+  .win .r .t{font-family:var(--font-mono); font-size:10px; color:#98a0aa; text-align:right}
+  .win.back1{left:calc((100% - (var(--cw) + var(--ox) * 2)) / 2 + var(--ox)); top:var(--oy)}
+  .win.front{left:calc((100% - (var(--cw) + var(--ox) * 2)) / 2 + var(--ox) * 2); top:calc(var(--oy) * 2)}
+  .win.back2{top:0}
+  /* Dimmed by an overlay drawn on top, so the windows' own pixels stay sharp. */
+  .win.back2::after, .win.back1::after{content:''; position:absolute; inset:0; pointer-events:none}
+  .win.back1::after{background:linear-gradient(105deg, rgba(9,11,14,.58), rgba(9,11,14,.34))}
+  .win.back2::after{background:linear-gradient(105deg, rgba(9,11,14,.80), rgba(9,11,14,.60))}
   figcaption{margin-top:var(--s4); display:flex; gap:var(--s6); flex-wrap:wrap}
+
+  /* The second figure: what each account brings with it. A diagram, not a
+     pretend screenshot, so it cannot go stale when the app changes. */
+  .schema{margin-top:var(--s6); overflow-x:auto}
+  .schema svg{width:100%; min-width:700px; height:auto; display:block}
 
   /* Three plain points. No figures, no cards. */
   .facts{border-top:var(--rule); padding:var(--s8) 0}
@@ -158,8 +199,14 @@
   }
 
   /* Testimonials. Quiet, so the joke lands without a card around it. */
-  .says{border-top:var(--rule); padding:var(--s8) 0; display:grid}
-  .says .wrap{display:grid; gap:var(--s7) var(--s7); grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  /* Not a grid: as one, its auto track sized to the inner grid's max-content
+     (three 240px columns), which pushed the whole page to 864px and gave every
+     phone a horizontal scrollbar. The inner .wrap does the column work. */
+  .says{border-top:var(--rule); padding:var(--s8) 0}
+  /* min-width:0 because .says is a grid and this is a grid item: without it the
+     item cannot shrink below the three 240px columns, so the whole page gained a
+     horizontal scrollbar on any phone. */
+  .says .wrap{display:grid; min-width:0; gap:var(--s7) var(--s7); grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
   .says-label{grid-column:1/-1; margin-bottom:calc(var(--s7) * -1 + var(--s3))}
   .says blockquote{margin:0}
   .says p{margin:0; font-size:17px; line-height:1.45}
@@ -183,11 +230,28 @@
   .flink:hover{color:var(--ink); border-bottom-color:var(--ink)}
   footer .wrap{display:flex; justify-content:space-between; gap:var(--s5); flex-wrap:wrap}
 
+  /* The fan needs the width of one window plus two offsets. Below that it gets
+     smaller, then drops to the front window alone rather than shrinking type. */
+  @media (max-width:1040px){
+    .fan{--cw:452px; --ox:52px; --oy:70px}
+  }
+  @media (max-width:880px){
+    .fan{--cw:380px; --ox:40px; --oy:62px}
+    .win .r{grid-template-columns:5px 24px 84px 1fr; gap:8px}
+    .win .r .t{display:none}
+  }
   @media (max-width:760px){
     .fact{grid-template-columns:1fr; gap:var(--s3)}
-    .app{height:260px}
-    .rail{width:52px}
-    .face{width:30px; height:30px; font-size:11px}
+    /* One window, full width. Scaling the stack down would resample the text. */
+    .fan{height:auto}
+    .fan .win.back1, .fan .win.back2{display:none}
+    .fan .win.front{position:relative; left:0; top:0; width:100%; height:auto}
+    .win .body .r:nth-child(n+5){display:none}
+  }
+  @media (max-width:520px){
+    .win .r{grid-template-columns:5px 22px 1fr; gap:8px}
+    .win .r .f{display:none}
+    .win .search span{display:none}
   }
   @media (prefers-reduced-motion:reduce){ .cta{transition:none} }
 </style>
@@ -221,59 +285,72 @@
         <a class="cta" href="https://github.com/failpunk/masse/releases/latest/download/Masse.zip">Download for macOS</a>
         <span class="micro fig">1.2 MB &nbsp;/&nbsp; macOS 11 or later &nbsp;/&nbsp; Apple silicon</span>
       </div>
-      <p class="firstrun">Signed and notarized by Apple, so it opens the first time.</p>
     </div>
   </section>
 
   <figure>
     <div class="wrap">
-      <div class="app-halo">
-      <div class="app">
-        <div class="rail">
-          <span class="face on" style="background:#6366f1">JV</span>
-          <span class="face" style="background:#ec4899">AE</span>
-          <span class="face" style="background:#f59e0b">S</span>
-        </div>
-        <div class="app-main">
-          <div class="tabs">
-            <span class="tab on">Mail</span>
-            <span class="tab">Calendar</span>
-            <span class="tab">Drive</span>
+      <div class="fan">
+
+        <div class="win back2">
+          <div class="bar">
+            <span class="lights"><span class="light" style="background:#ff5f57"></span><span class="light" style="background:#febc2e"></span><span class="light" style="background:#28c840"></span></span>
+            <span class="who" style="background:#f59e0b">S</span><span class="label">Side project</span><span class="count">2</span>
           </div>
-          <div class="screen">
-            <div class="pane on" data-pane="mail">
-              <div class="line dark" style="width:54%"></div>
-              <div class="line" style="width:78%"></div>
-              <div class="line" style="width:41%"></div>
-              <div class="line" style="width:66%"></div>
-              <div class="line" style="width:88%"></div>
-              <div class="line" style="width:35%"></div>
-            </div>
-            <div class="pane" data-pane="calendar">
-              <div class="cal">
-                <span></span><span></span><span></span><span></span><span></span>
-                <i style="grid-column:1; top:14%; height:16%"></i>
-                <i style="grid-column:2; top:38%; height:24%"></i>
-                <i style="grid-column:4; top:22%; height:12%"></i>
-                <i style="grid-column:5; top:56%; height:20%"></i>
-              </div>
-            </div>
-            <div class="pane" data-pane="drive">
-              <div class="files">
-                <div><b></b><span style="width:58%"></span></div>
-                <div><b></b><span style="width:44%"></span></div>
-                <div><b></b><span style="width:71%"></span></div>
-                <div><b></b><span style="width:36%"></span></div>
-              </div>
-            </div>
+          <div class="tool">
+            <span class="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><span>Search mail</span></span>
+            <span class="apps"><span class="chip on">Mail</span><span class="chip">Calendar</span><span class="chip">Drive</span></span>
+          </div>
+          <div class="body">
+            <div class="r"><span class="d"></span><span class="av" style="background:#7c8b9a">DM</span><span class="f">Domains</span><span class="s"><b>Renewal notice</b> one domain expires in 14 days</span><span class="t">9:20</span></div>
+            <div class="r"><span class="d"></span><span class="av" style="background:#b06ab3">IF</span><span class="f">Ines Ferrer</span><span class="s"><b>Logo drafts</b> three directions, second is closest</span><span class="t">8:44</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#5a8f6d">AN</span><span class="f">Analytics</span><span class="s"><b>Weekly summary</b> sessions up, bounce flat</span><span class="t">Tue</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#8a7f6d">SP</span><span class="f">Support</span><span class="s"><b>Ticket closed</b> no action needed from you</span><span class="t">Mon</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#6f7f96">HO</span><span class="f">Hosting</span><span class="s"><b>Usage report</b> for last month</span><span class="t">Mon</span></div>
           </div>
         </div>
-      </div>
+
+        <div class="win back1">
+          <div class="bar">
+            <span class="lights"><span class="light" style="background:#ff5f57"></span><span class="light" style="background:#febc2e"></span><span class="light" style="background:#28c840"></span></span>
+            <span class="who" style="background:#ec4899">AE</span><span class="label">Work</span><span class="count">6</span>
+          </div>
+          <div class="tool">
+            <span class="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><span>Search mail</span></span>
+            <span class="apps"><span class="chip">Mail</span><span class="chip on">Calendar</span><span class="chip">Drive</span></span>
+          </div>
+          <div class="body">
+            <div class="r"><span class="d"></span><span class="av" style="background:#c2557a">NR</span><span class="f">Nadia Rahman</span><span class="s"><b>Contract redlines</b> attached, one open question</span><span class="t">9:52</span></div>
+            <div class="r"><span class="d"></span><span class="av" style="background:#4b6bd6">DE</span><span class="f">Deploy</span><span class="s"><b>Build 4182 passed</b> on main in 6m 12s</span><span class="t">9:07</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#6d7f8f">TB</span><span class="f">Tomas Berg</span><span class="s"><b>Re: pricing page</b> the second option reads better</span><span class="t">8:31</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#4b8f8a">CA</span><span class="f">Calendar</span><span class="s"><b>Design sync</b> Friday at 11:00</span><span class="t">Tue</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#8b7a5f">PY</span><span class="f">Payroll</span><span class="s"><b>Payslip</b> is available to download</span><span class="t">Tue</span></div>
+          </div>
+        </div>
+
+        <div class="win front">
+          <div class="bar">
+            <span class="lights"><span class="light" style="background:#ff5f57"></span><span class="light" style="background:#febc2e"></span><span class="light" style="background:#28c840"></span></span>
+            <span class="who" style="background:#6366f1">JV</span><span class="label">Personal</span><span class="count">3</span>
+          </div>
+          <div class="tool">
+            <span class="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><span>Search mail</span></span>
+            <span class="apps"><span class="chip on">Mail</span><span class="chip">Calendar</span><span class="chip">Drive</span></span>
+          </div>
+          <div class="body">
+            <div class="r sel"><span class="d"></span><span class="av" style="background:#5b62d6">ME</span><span class="f">Mara Ellison</span><span class="s"><b>Thursday review moved</b> to 2pm, same room</span><span class="t">9:41</span></div>
+            <div class="r"><span class="d"></span><span class="av" style="background:#3f7fb5">BI</span><span class="f">Billing</span><span class="s"><b>Receipt</b> for your July invoice</span><span class="t">9:12</span></div>
+            <div class="r"><span class="d"></span><span class="av" style="background:#a35c8f">PR</span><span class="f">Priya Raman</span><span class="s"><b>Notes from the call</b> plus the recording link</span><span class="t">8:58</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#6b7f5a">FL</span><span class="f">Flights</span><span class="s"><b>Check-in opens</b> tomorrow at 07:00</span><span class="t">Tue</span></div>
+            <div class="r read"><span class="d"></span><span class="av" style="background:#7a7f8a">BK</span><span class="f">Bank</span><span class="s"><b>Statement ready</b> for July</span><span class="t">Mon</span></div>
+          </div>
+        </div>
+
       </div>
       <figcaption>
-        <span class="micro">Accounts on the left</span>
-        <span class="micro">Apps across the top</span>
-        <span class="micro">Neither one moves the other</span>
+        <span class="micro">One window per account</span>
+        <span class="micro">All of them in one app</span>
+        <span class="micro">Switch with a click</span>
       </figcaption>
     </div>
   </figure>
@@ -285,6 +362,64 @@
         <li>Mail, Calendar and Drive for every one of them.</li>
         <li>Switch with a click, or Command and a number.</li>
       </ul>
+      <div class="schema">
+        <svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img"
+             aria-label="Three Google accounts, each bringing Mail, Calendar and Drive, converging into one window.">
+          <defs>
+            <style>
+              .lbl{font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.14em;
+                   text-transform:uppercase; fill:#8a9099}
+              .sub{font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.1em;
+                   text-transform:uppercase; fill:#6d757e}
+              .nm{font-family:'Space Grotesk',sans-serif; font-size:13px; fill:#f1f2f4}
+              .ini{font-family:'Archivo',sans-serif; font-weight:900; font-size:12px; fill:#fff}
+              .wire{stroke:#3a424c; stroke-width:1; fill:none}
+              .box{fill:#1b2027; stroke:#4a525d; stroke-width:1}
+              .chip{fill:#12161b; stroke:#2a2f36; stroke-width:1}
+            </style>
+          </defs>
+
+          <text x="0" y="12" class="lbl">Three accounts</text>
+          <text x="600" y="12" class="lbl">One window</text>
+
+          <circle cx="26" cy="60" r="19" fill="#6366f1"/>
+          <text x="26" y="65" text-anchor="middle" class="ini">JV</text>
+          <text x="58" y="57" class="nm">Personal</text>
+          <text x="58" y="74" class="sub">Mail · Calendar · Drive</text>
+
+          <circle cx="26" cy="152" r="19" fill="#ec4899"/>
+          <text x="26" y="157" text-anchor="middle" class="ini">AE</text>
+          <text x="58" y="149" class="nm">Work</text>
+          <text x="58" y="166" class="sub">Mail · Calendar · Drive</text>
+
+          <circle cx="26" cy="244" r="19" fill="#f59e0b"/>
+          <text x="26" y="249" text-anchor="middle" class="ini">S</text>
+          <text x="58" y="241" class="nm">Side project</text>
+          <text x="58" y="258" class="sub">Mail · Calendar · Drive</text>
+
+          <path class="wire" d="M250 60 C 380 60, 400 152, 520 152"/>
+          <path class="wire" d="M250 152 L 520 152"/>
+          <path class="wire" d="M250 244 C 380 244, 400 152, 520 152"/>
+          <circle cx="520" cy="152" r="3" fill="#7d9cff"/>
+
+          <rect class="box" x="600" y="42" width="380" height="220"/>
+          <rect x="600" y="42" width="380" height="30" fill="#12161b" stroke="#2a2f36"/>
+          <circle cx="618" cy="57" r="5" fill="#6366f1"/>
+          <circle cx="634" cy="57" r="5" fill="#ec4899" opacity=".45"/>
+          <circle cx="650" cy="57" r="5" fill="#f59e0b" opacity=".45"/>
+          <rect class="chip" x="616" y="88" width="72" height="24"/>
+          <text x="652" y="104" text-anchor="middle" class="lbl" style="fill:#f1f2f4">Mail</text>
+          <rect class="chip" x="696" y="88" width="96" height="24"/>
+          <text x="744" y="104" text-anchor="middle" class="lbl">Calendar</text>
+          <rect class="chip" x="800" y="88" width="72" height="24"/>
+          <text x="836" y="104" text-anchor="middle" class="lbl">Drive</text>
+          <rect x="616" y="132" width="240" height="7" fill="#39414b"/>
+          <rect x="616" y="152" width="330" height="7" fill="#2a3038"/>
+          <rect x="616" y="172" width="180" height="7" fill="#2a3038"/>
+          <rect x="616" y="192" width="290" height="7" fill="#2a3038"/>
+          <rect x="616" y="212" width="140" height="7" fill="#2a3038"/>
+        </svg>
+      </div>
     </div>
   </section>
 
@@ -325,30 +460,6 @@
   </div>
 </footer>
 
-<script>
-  // Steps through account and app the way somebody actually uses it. Illustrative
-  // rather than decorative, which is why it walks a real sequence instead of pulsing.
-  (function () {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var faces = [].slice.call(document.querySelectorAll('.face'));
-    var tabs = [].slice.call(document.querySelectorAll('.tab'));
-    var panes = [].slice.call(document.querySelectorAll('.pane'));
-    if (!faces.length || !tabs.length) return;
-
-    var sequence = [[0,0],[0,1],[1,1],[1,0],[2,2],[2,0],[0,0]];
-    var i = 0;
-    var step = parseInt(getComputedStyle(document.documentElement)
-                 .getPropertyValue('--demo-step'), 10) || 2600;
-
-    setInterval(function () {
-      i = (i + 1) % sequence.length;
-      var account = sequence[i][0], app = sequence[i][1];
-      faces.forEach(function (f, n) { f.classList.toggle('on', n === account); });
-      tabs.forEach(function (t, n) { t.classList.toggle('on', n === app); });
-      panes.forEach(function (p, n) { p.classList.toggle('on', n === app); });
-    }, step);
-  })();
-</script>
 <script>
   document.querySelector('.cta')?.addEventListener('click', function () {
     window.posthog?.capture('download_clicked', {
