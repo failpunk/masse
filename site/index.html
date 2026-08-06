@@ -179,49 +179,79 @@
   .win.back2::after, .win.back1::after{content:''; position:absolute; inset:0; pointer-events:none}
   .win.back1::after{background:linear-gradient(105deg, rgba(9,11,14,.58), rgba(9,11,14,.34))}
   .win.back2::after{background:linear-gradient(105deg, rgba(9,11,14,.80), rgba(9,11,14,.60))}
-  figcaption{margin-top:var(--s4); display:flex; gap:var(--s6); flex-wrap:wrap}
 
   /* The second figure: what each account brings with it. A diagram, not a
      pretend screenshot, so it cannot go stale when the app changes. */
   .schema{margin-top:var(--s6); overflow-x:auto}
   .schema svg{width:100%; min-width:700px; height:auto; display:block}
 
-  /* Three plain points. No figures, no cards. */
+  /* One statement, then the diagram that proves it. */
   .facts{border-top:var(--rule); padding:var(--s8) 0}
-  .points{list-style:none; margin:0; padding:0; display:grid; gap:var(--s5); max-width:46ch}
-  .points li{
-    font-size:clamp(19px,2.4vw,26px); line-height:1.35; letter-spacing:-.01em;
-    padding-left:var(--s6); position:relative;
+  /* Both section titles: centred over the figure each one introduces. */
+  .fact-title{
+    font-family:var(--font-display); font-weight:900;
+    font-size:clamp(26px,4vw,48px); line-height:1.05; letter-spacing:-.03em;
+    margin:0 auto; max-width:24ch; text-align:center;
   }
-  .points li::before{
-    content:''; position:absolute; left:0; top:.62em;
-    width:12px; height:1px; background:var(--accent-lift);
-  }
+  .fig-title{margin-bottom:var(--s7)}
 
-  /* Testimonials. Quiet, so the joke lands without a card around it. */
-  /* Not a grid: as one, its auto track sized to the inner grid's max-content
-     (three 240px columns), which pushed the whole page to 864px and gave every
-     phone a horizontal scrollbar. The inner .wrap does the column work. */
-  .says{border-top:var(--rule); padding:var(--s8) 0}
-  /* min-width:0 because .says is a grid and this is a grid item: without it the
-     item cannot shrink below the three 240px columns, so the whole page gained a
-     horizontal scrollbar on any phone. */
-  .says .wrap{display:grid; min-width:0; gap:var(--s7) var(--s7); grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-  .says-label{grid-column:1/-1; margin-bottom:calc(var(--s7) * -1 + var(--s3))}
-  .says blockquote{margin:0}
-  .says p{margin:0; font-size:17px; line-height:1.45}
+  /* Testimonials. The one raised band on the page: every other section is the
+     same ground behind the same hairline, so this one lifts to --surface and is
+     closed off by a brighter rule top and bottom. A surface expressed with a
+     rule rather than a shadow, per the design system.
+
+     Not a grid itself: as one, its auto track sized to the inner grid's
+     max-content (three 240px columns), which pushed the whole page to 864px and
+     gave every phone a horizontal scrollbar. The inner .wrap does the columns. */
+  .says{
+    background:var(--surface); padding:var(--s8) 0;
+    border-top:1px solid #39414b; border-bottom:1px solid #39414b;
+  }
+  /* min-width:0 so the item can shrink below the three 240px columns. */
+  /* Exactly three columns, not auto-fit. auto-fit fitted FOUR 240px tracks at
+     this width and the three quotes filled the first three, leaving the group
+     shunted to the left with an empty track on the right. The empty track never
+     collapsed because the label spans 1/-1, which counts as occupying it. */
+  .says .wrap{display:grid; min-width:0; gap:0 0; grid-template-columns:repeat(3,minmax(0,1fr))}
+  .says-label{grid-column:1/-1; margin-bottom:var(--s6); text-align:center}
+  /* Hairlines between the quotes, none before the first. Each quote is a full
+     height column so the names sit on one line regardless of how long the quote
+     above them runs: margin-top:auto pushes every name to the same baseline. */
+  .says blockquote{
+    margin:0; padding:0 var(--s5); border-left:1px solid #2f3841;
+    display:flex; flex-direction:column; text-align:center;
+  }
+  .says blockquote:first-of-type{border-left:0}
+  .says p{margin:0; font-size:18px; line-height:1.45}
   .says cite{
-    display:block; margin-top:var(--s3); font-style:normal;
+    display:block; margin-top:auto; padding-top:var(--s5); font-style:normal;
     font-family:var(--font-mono); font-size:10px; letter-spacing:.18em;
-    text-transform:uppercase; color:var(--ink-soft);
+    text-transform:uppercase; color:var(--accent-lift);
   }
   .says cite::before{content:'/ '}
 
-  /* Install */
+  /* Install. Outlined numerals carry this section: the steps are very unequal in
+     length, so a numeral doing the work means the text can be any size it needs
+     to be. The first is in accent, the rest recede. */
   .install{border-top:var(--rule); padding:var(--s8) 0}
-  .steps{list-style:none; margin:var(--s5) 0 0; padding:0; display:grid; gap:var(--s3); max-width:60ch}
-  .steps li{display:flex; gap:var(--s5)}
-  .steps span{font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); flex:none; padding-top:3px}
+  .install .fact-title{margin-bottom:var(--s8)}
+  .steps{list-style:none; margin:0 auto; padding:0; max-width:76ch; display:grid; gap:var(--s7)}
+  /* Fixed numeral column, not auto: Archivo's digits are proportional, so 01 is
+     12px narrower than 03 and an auto column started each row's text at a
+     different place. tabular-nums evens the digits inside the numeral too. */
+  .steps li{display:grid; grid-template-columns:112px 1fr; align-items:center; gap:var(--s6)}
+  .steps .n{
+    font-family:var(--font-display); font-weight:900; font-size:80px; line-height:.82;
+    letter-spacing:-.05em; color:transparent; -webkit-text-stroke:1px #39414b;
+    font-variant-numeric:tabular-nums;
+  }
+  .steps li:first-child .n{-webkit-text-stroke-color:var(--accent-lift)}
+  .steps .t{font-size:20px; line-height:1.4; letter-spacing:-.01em}
+  @media (max-width:560px){
+    .steps li{grid-template-columns:78px 1fr; gap:var(--s5)}
+    .steps .n{font-size:56px}
+    .steps .t{font-size:17px}
+  }
 
   footer{border-top:var(--rule); padding:var(--s5) 0 var(--s7)}
   /* Sits in the footer row, not a pill. Coloured just enough to read as a link. */
@@ -239,6 +269,11 @@
     .fan{--cw:380px; --ox:40px; --oy:62px}
     .win .r{grid-template-columns:5px 24px 84px 1fr; gap:8px}
     .win .r .t{display:none}
+    /* One column below this width: three columns of 18px quotes get too narrow,
+       and a divider on the left of a quote that is now first in its row reads as
+       a stray line. Space them instead. */
+    .says .wrap{grid-template-columns:1fr; gap:var(--s6) 0}
+    .says blockquote{padding:0; border-left:0}
   }
   @media (max-width:760px){
     .fact{grid-template-columns:1fr; gap:var(--s3)}
@@ -290,6 +325,7 @@
 
   <figure>
     <div class="wrap">
+      <h2 class="fact-title fig-title">Consolidate your army of Google accounts.</h2>
       <div class="fan">
 
         <div class="win back2">
@@ -347,21 +383,12 @@
         </div>
 
       </div>
-      <figcaption>
-        <span class="micro">One window per account</span>
-        <span class="micro">All of them in one app</span>
-        <span class="micro">Switch with a click</span>
-      </figcaption>
     </div>
   </figure>
 
   <section class="facts">
     <div class="wrap">
-      <ul class="points">
-        <li>All of your Google accounts live in one window.</li>
-        <li>Mail, Calendar and Drive for every one of them.</li>
-        <li>Switch with a click, or Command and a number.</li>
-      </ul>
+      <h2 class="fact-title">One-click access to Mail, Calendar, and Drive</h2>
       <div class="schema">
         <svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img"
              aria-label="Three Google accounts, each bringing Mail, Calendar and Drive, converging into one window.">
@@ -443,11 +470,11 @@
 
   <section class="install">
     <div class="wrap">
-      <span class="micro">Setup</span>
+      <h2 class="fact-title">Three steps, then you are done</h2>
       <ol class="steps">
-        <li><span>01</span> Move Masse to your Applications folder.</li>
-        <li><span>02</span> Sign in to each one of your Google accounts.</li>
-        <li><span>03</span> Wish you hadn't signed in to all your Google accounts after looking at how full your calendar is, and then regret your decision.</li>
+        <li><span class="n">01</span><span class="t">Move Masse to your Applications folder.</span></li>
+        <li><span class="n">02</span><span class="t">Sign in to each one of your Google accounts.</span></li>
+        <li><span class="n">03</span><span class="t">Wish you hadn't signed in to all your Google accounts after looking at how full your calendar is, and then regret your decision.</span></li>
       </ol>
     </div>
   </section>
