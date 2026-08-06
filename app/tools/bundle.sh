@@ -72,19 +72,72 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature. Not notarised, but enough that macOS keeps a stable identity
-# for the app rather than re-prompting for permissions on every rebuild.
-codesign --force --deep --sign - "$APP" 2>/dev/null || echo "[bundle] codesign skipped"
+# Signing. The default is an ad-hoc signature: instant, needs no network, and
+# enough for macOS to keep a stable identity across rebuilds so the app is not
+# re-prompted for permissions. That is what you want while iterating.
+#
+# A build for other people needs a Developer ID signature AND notarisation, or
+# macOS refuses to open it. Both are opt-in so a normal build stays fast:
+#
+#   MASSE_SIGN_ID="Developer ID Application: NAME (TEAMID)" \
+#   MASSE_NOTARY_PROFILE=masse-notary \
+#   ./app/tools/bundle.sh
+#
+# `security find-identity -v -p codesigning` lists the identity strings, and the
+# profile is one made earlier by `xcrun notarytool store-credentials`.
+SIGN_ID="${MASSE_SIGN_ID:-}"
+NOTARY_PROFILE="${MASSE_NOTARY_PROFILE:-}"
+
+sign_app() {
+  if [ -n "$SIGN_ID" ]; then
+    # --options runtime (hardened runtime) and --timestamp are both required by
+    # notarisation; a build missing either is rejected. No --deep: Apple
+    # discourages it for signing and this bundle has no nested code anyway.
+    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$1"
+  else
+    codesign --force --deep --sign - "$1" 2>/dev/null || echo "[bundle] codesign skipped"
+  fi
+}
+
+sign_app "$APP"
 
 # Install to /Applications. Without this the only copy lives under target/, which
 # any rebuild or `cargo clean` deletes, so the Dock icon and Spotlight entry break.
 # Same bundle id, so the session and cookie jar carry over.
 INSTALLED="/Applications/Masse.app"
 if rsync -a --delete "$APP/" "$INSTALLED/" 2>/dev/null; then
-  codesign --force --deep --sign - "$INSTALLED" 2>/dev/null || true
+  sign_app "$INSTALLED"
   echo "[bundle] installed $INSTALLED"
 else
   echo "[bundle] WARNING: could not install to $INSTALLED; run it from $APP"
+fi
+
+# Notarisation, before the distributable zip is made. Apple checks the upload and
+# issues a ticket; `stapler` then writes that ticket into the bundle so it opens
+# even offline. The zip that was submitted does NOT contain the ticket, which is
+# the classic way to ship something that still warns, so the zip below is always
+# built after this step.
+if [ -n "$SIGN_ID" ] && [ -n "$NOTARY_PROFILE" ]; then
+  SUBMIT_ZIP=$(mktemp -d)/Masse-submit.zip
+  ditto -c -k --keepParent "$INSTALLED" "$SUBMIT_ZIP"
+  echo "[bundle] submitting for notarisation (a few minutes)"
+  xcrun notarytool submit "$SUBMIT_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$INSTALLED"
+  xcrun stapler staple "$APP" 2>/dev/null || true
+  # The real test: what Gatekeeper says about the copy we are about to ship.
+  # Judge by exit status, not by grepping the output: spctl prints nothing at all
+  # on success unless --verbose is passed, so matching on "accepted" reported a
+  # failure for a build that had in fact passed.
+  if spctl --assess --type execute "$INSTALLED" 2>/dev/null; then
+    echo "[bundle] notarised: $(spctl --assess --type execute --verbose "$INSTALLED" 2>&1 | tail -1)"
+  else
+    echo "[bundle] ERROR: still rejected by Gatekeeper after stapling" >&2
+    spctl --assess --type execute --verbose "$INSTALLED" 2>&1 | tail -2 >&2
+    exit 1
+  fi
+elif [ -n "$SIGN_ID" ]; then
+  echo "[bundle] WARNING: signed with Developer ID but NOT notarised (no MASSE_NOTARY_PROFILE)"
+  echo "[bundle] macOS will still refuse to open this on another Mac"
 fi
 
 # Refresh the landing page's download so it can never be an older build than the

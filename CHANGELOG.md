@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0
+- **Masse is signed and notarized, so it just opens.** Every release until now was
+  ad-hoc signed, which meant macOS refused to launch it and every download came
+  with instructions for talking your way past Gatekeeper. The app is now signed
+  with a Developer ID certificate under the hardened runtime, submitted to Apple
+  for notarization, and the resulting ticket is stapled into the bundle, so it
+  opens on a machine that has never seen it and with no network. Verified by
+  extracting the shipped zip to a clean location and asking Gatekeeper directly:
+  `accepted, source=Notarized Developer ID`.
+- `bundle.sh` does the signing and notarizing on release builds only, driven by
+  `MASSE_SIGN_ID` and `MASSE_NOTARY_PROFILE`. Without them a build is ad-hoc and
+  instant, which is what you want while iterating. It stapled the ticket before
+  building the distributable zip, because the zip submitted to Apple does not
+  contain the ticket, and it fails the build outright if Gatekeeper still rejects
+  the result.
+- The site no longer explains how to get past the warning, because there is no
+  longer a warning.
+
 ## 0.16.0
 - **Link rewriting is now a setting, on by default.** Settings has a Links section
   with one switch: "Fix Google account links". Turn it off and every link is handed
