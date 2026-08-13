@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.1
+- **A pane can no longer show the wrong account.** Masse asks Google for an
+  account with `?authuser=<address>`, but only ever checked which *host* came
+  back. When Google signs one account out it silently serves whichever account is
+  still signed in, on the same host, so a pane kept its label and its colour while
+  showing somebody else's mail. The page already reports which account it belongs
+  to; that is now compared against the account the pane was asked for, and a
+  mismatch sends the pane to the login page for the account it claims to be. Once
+  per pane, so a login that keeps failing cannot loop.
+- **An unknown account is no longer added just because a page mentioned it.**
+  Discovery is now limited to the add-account flow, which is the only place an
+  unfamiliar address is expected. Previously a mix-up could quietly write the
+  wrong account into the config.
+- **The navigation cannot disappear.** The rail and the top bar were emptied and
+  then rebuilt, so anything that threw part way through left them blank for good,
+  which looks exactly like the navigation vanishing. Both now build into a
+  fragment and swap it in at the end: a failed render keeps what was already
+  there. The specific fault found by reproducing it: an account with no colour
+  reached the contrast helper, which called `.slice()` on `undefined` and threw.
+  That helper is now guarded, and errors in either chrome webview are reported
+  instead of being swallowed by a console nobody reads.
+
 ## 1.0.0
 - **Masse is signed and notarized, so it just opens.** Every release until now was
   ad-hoc signed, which meant macOS refused to launch it and every download came

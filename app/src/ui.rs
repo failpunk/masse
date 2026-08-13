@@ -49,13 +49,24 @@ const SHARED_JS: &str = r#"
   // A highlight can be yellow or indigo, so the glyph sitting on it cannot be a
   // fixed colour. Relative luminance decides light or dark ink.
   const readable = (hex) => {
+    // Guarded: called once per account per render, and .slice() on a missing or
+    // short colour throws, which used to take the whole rail down with it.
+    if (typeof hex !== 'string' || hex.length < 7) return '#f1f2f4';
     const chan = (i) => {
       const c = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
       return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
     };
-    return 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2) > 0.36
-      ? '#11131a' : '#f1f2f4';
+    const l = 0.2126 * chan(0) + 0.7152 * chan(1) + 0.0722 * chan(2);
+    if (!isFinite(l)) return '#f1f2f4';
+    return l > 0.36 ? '#11131a' : '#f1f2f4';
   };
+  // Anything thrown in here is otherwise invisible: these webviews have no
+  // console anyone reads, so a failed render just looks like missing chrome.
+  window.addEventListener('error', (e) => {
+    try {
+      send({ type: 'jslog', msg: e.message + ' @ ' + e.filename + ':' + e.lineno });
+    } catch (_) {}
+  });
   const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
     + 'stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">'
     + '<path d="M5 12.8l4.6 4.4L19 6.6"/></svg>';
@@ -168,7 +179,12 @@ pub fn rail_html(state: &str) -> String {
       const stacked = state.nav === 'stacked';
       document.body.classList.toggle('stacked', stacked);
       const rail = document.getElementById('rail');
-      rail.textContent = '';
+      // Built into a fragment and swapped in at the end, NOT emptied first. The
+      // previous version cleared the rail and then rebuilt it, so anything that
+      // threw part way through left the rail permanently blank, which reads as
+      // the navigation having disappeared. Now a failed render is a no-op: you
+      // keep the rail you had, and the error is reported.
+      const frag = document.createDocumentFragment();
 
       for (const a of state.accounts) {{
         const here = a.email.toLowerCase() === (state.active.email || '').toLowerCase();
@@ -206,8 +222,9 @@ pub fn rail_html(state: &str) -> String {
           }}
           slot.appendChild(apps);
         }}
-        rail.appendChild(slot);
+        frag.appendChild(slot);
       }}
+      rail.replaceChildren(frag);
     }},
   }};
   document.getElementById('gear').onclick = () => send({{ type: 'settings' }});
@@ -248,14 +265,17 @@ pub fn topbar_html(state: &str) -> String {
   window.shim = {{
     render(state) {{
       const tabs = document.getElementById('tabs');
-      tabs.textContent = '';
+      // Same reason as the rail: build, then swap, so a throw leaves what was
+      // there rather than an empty bar.
+      const frag = document.createDocumentFragment();
       for (const s of state.services) {{
         const b = document.createElement('button');
         b.className = 'tab' + (s === state.active.service ? ' on' : '');
         b.innerHTML = svg(ICONS[s]) + `<span>${{LABELS[s]}}</span>`;
         b.onclick = () => send({{ type: 'show', email: state.active.email, service: s }});
-        tabs.appendChild(b);
+        frag.appendChild(b);
       }}
+      tabs.replaceChildren(frag);
       // Which account you are in, so the apps across the top are never ambiguous.
       const who = document.getElementById('who');
       who.textContent = '';

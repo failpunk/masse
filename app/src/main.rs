@@ -82,7 +82,13 @@ enum Msg {
     Show { email: String, service: String },
     /// A pane finished loading somewhere. Used to notice the signed-out bounce.
     Landed { email: String, service: String, url: String },
-    Avatar { email: String, src: String },
+    /// A pane reported which account Google actually served it. `owner` is the
+    /// account the pane was asked for, `email` is what came back. They differ when
+    /// Google has signed that account out.
+    Avatar { owner: String, service: String, email: String, src: String },
+    /// A pane is showing an account other than the one it is labelled with. Sent
+    /// once per pane so a login that keeps failing cannot loop.
+    WrongAccount { owner: String, service: String, served: String },
     /// Open Google's add-account flow.
     AddAccount,
     OpenSettings,
@@ -430,12 +436,39 @@ fn main() -> wry::Result<()> {
                 }
             }
 
-            Event::UserEvent(Msg::Avatar { email, src }) => {
+            Event::UserEvent(Msg::WrongAccount { owner, service, served }) => {
+                // Masse asks for an account with ?authuser=<address>. When Google
+                // has signed that account out it silently serves whichever account
+                // IS signed in, on the same host, so nothing downstream notices and
+                // the pane shows somebody else's mail under the wrong name and
+                // colour. Send it to the login page for the account it claims.
+                let key = key_of(&owner, &service);
+                let Ok(mut state) = app.try_borrow_mut() else { return };
+                if state.rescued.insert(key.clone()) {
+                    println!(
+                        "[masse] {owner} {service} was served as {served}; going to login for {owner}"
+                    );
+                    if let Some(view) = state.panes.get(&key) {
+                        let _ = view.load_url(&signin_url(&owner, &service));
+                    }
+                } else {
+                    println!("[masse] {owner} {service} still served as {served}; leaving it alone");
+                }
+            }
+
+            Event::UserEvent(Msg::Avatar { owner, service, email, src }) => {
                 let Ok(mut app) = app.try_borrow_mut() else { return };
                 // Google serves the header thumbnail at 32px; ask for a retina one.
                 let src = upscale(&src);
                 let wanted = email.trim().to_lowercase();
+                // Only the add-account flow may introduce a new account. Anywhere
+                // else, an unrecognised address means we were served the wrong
+                // account, and adding it would quietly legitimise the mix-up.
                 if app.config.find(&wanted).is_none() {
+                    if service != ADD {
+                        println!("[masse] {owner} {service} reported unknown account {wanted}; not adding");
+                        return;
+                    }
                     let index = app.config.accounts.len();
                     app.config.accounts.push(Account::discovered(&wanted, index));
                     app.config.save();
@@ -1094,6 +1127,12 @@ fn handle_rail(proxy: &EventLoopProxy<Msg>, body: &str) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         return;
     };
+    // A chrome webview has no console anyone sees, so an error in the rail or the
+    // top bar used to be completely silent.
+    if value["type"] == "jslog" {
+        eprintln!("[chrome] {}", value["msg"].as_str().unwrap_or_default());
+        return;
+    }
     let msg = match value["type"].as_str() {
         Some("show") => Msg::Show {
             email: value["email"].as_str().unwrap_or_default().to_string(),
@@ -1140,11 +1179,26 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
         return;
     }
     if value["type"] == "avatar" {
-        let (Some(email), Some(src)) = (value["email"].as_str(), value["src"].as_str()) else {
+        let (Some(served), Some(src)) = (value["email"].as_str(), value["src"].as_str()) else {
             return;
         };
+        // The address on the page is the account Google actually served. The add
+        // flow is exempt: it exists precisely to end up on an account we do not
+        // know yet.
+        let mismatch = service != ADD
+            && served.trim().to_lowercase() != email.trim().to_lowercase();
+        if mismatch {
+            let _ = proxy.send_event(Msg::WrongAccount {
+                owner: email.to_string(),
+                service: service.to_string(),
+                served: served.to_string(),
+            });
+            return;
+        }
         let _ = proxy.send_event(Msg::Avatar {
-            email: email.to_string(),
+            owner: email.to_string(),
+            service: service.to_string(),
+            email: served.to_string(),
             src: src.to_string(),
         });
     }
