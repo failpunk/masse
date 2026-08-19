@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.2
+- **The blue ring in the rail was Google's loading spinner.** An account's photo is
+  read off the page, and the code took the first image inside the account button.
+  Google puts a blue loading ring there from `ssl.gstatic.com` while the real photo
+  loads, so that spinner got saved as the avatar and drawn in the rail from then
+  on. Only a photo served from googleusercontent.com is accepted now, on both
+  sides, and anything already stored that is not one is discarded at launch, so an
+  affected account heals itself.
+- **Verifying which account a pane is showing no longer waits on a photo.** The
+  address and the photo are reported separately. Previously both travelled in the
+  same message, so an account with no photo was never checked at all, which
+  undercut the 1.0.1 fix.
+- **A dead photo URL falls back to initials.** Google's photo URLs expire. The
+  image simply failed before, leaving a circle of the account colour with nothing
+  in it.
+
 ## 1.0.1
 - **A pane can no longer show the wrong account.** Masse asks Google for an
   account with `?authuser=<address>`, but only ever checked which *host* came

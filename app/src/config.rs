@@ -193,6 +193,17 @@ impl Config {
                 account.color = PALETTE[i % PALETTE.len()].into();
             }
         }
+        // Drop anything stored as an avatar that is not a profile photo, so a
+        // previously captured loading spinner heals to initials on next launch
+        // instead of sitting in the rail until the account is removed.
+        for account in config.accounts.iter_mut() {
+            if let Some(src) = account.avatar.as_deref() {
+                if !is_avatar_url(src) {
+                    eprintln!("[masse] discarding non-photo avatar for {}: {src}", account.email);
+                    account.avatar = None;
+                }
+            }
+        }
         config.max_live = config.max_live.max(1);
         // A hand-edited file should not be able to put the window in a layout that
         // does not exist.
@@ -245,6 +256,17 @@ pub fn service_url(email: &str, service: &str) -> String {
 /// pages that contain no login form, so a pane that lands there is a dead end.
 /// This is the way back in: Google's own login, told where to go afterwards and
 /// which address to preselect.
+/// Whether a URL is plausibly somebody's profile photo.
+///
+/// Google serves real profile photos from googleusercontent.com. It also renders a
+/// blue loading ring from ssl.gstatic.com inside the same account button while the
+/// photo loads, and that spinner was being stored as an avatar and drawn in the
+/// rail indefinitely.
+pub fn is_avatar_url(src: &str) -> bool {
+    let Some(host) = host_of(src) else { return false };
+    src.starts_with("https://") && host.ends_with(".googleusercontent.com")
+}
+
 pub fn signin_url(email: &str, service: &str) -> String {
     format!(
         "https://accounts.google.com/ServiceLogin?continue={}&Email={}",
@@ -889,6 +911,22 @@ mod tests {
         // here fights the login it is in the middle of.
         let signin = "https://accounts.google.com/ServiceLogin?service=mail";
         assert_eq!(with_account(signin, "b@work.com"), signin);
+    }
+
+    #[test]
+    fn only_a_real_profile_photo_counts_as_an_avatar() {
+        assert!(is_avatar_url(
+            "https://lh3.googleusercontent.com/ogw/AF2bZyiceCF7p_dEIRqMcsPaJj50=s96-c"
+        ));
+        // Verbatim: this is Google's blue loading ring, and it was stored as an
+        // account's avatar and drawn in the rail until the account was removed.
+        assert!(!is_avatar_url(
+            "https://ssl.gstatic.com/gb/images/ring/pr_32px_asknjuyerc.png"
+        ));
+        assert!(!is_avatar_url("https://evilgoogleusercontent.com/photo.png"));
+        assert!(!is_avatar_url("http://lh3.googleusercontent.com/photo.png"));
+        assert!(!is_avatar_url("data:image/png;base64,AAAA"));
+        assert!(!is_avatar_url(""));
     }
 
     #[test]

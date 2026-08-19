@@ -1178,21 +1178,32 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
         });
         return;
     }
-    if value["type"] == "avatar" {
-        let (Some(served), Some(src)) = (value["email"].as_str(), value["src"].as_str()) else {
-            return;
-        };
-        // The address on the page is the account Google actually served. The add
-        // flow is exempt: it exists precisely to end up on an account we do not
-        // know yet.
-        let mismatch = service != ADD
-            && served.trim().to_lowercase() != email.trim().to_lowercase();
-        if mismatch {
+    // Which account the page actually belongs to. Reported on its own so that
+    // verifying the pane never depends on a profile photo existing.
+    if value["type"] == "account" {
+        let Some(served) = value["email"].as_str() else { return };
+        // The add flow is exempt: it exists precisely to land on an account we do
+        // not know yet.
+        if service != ADD && served.trim().to_lowercase() != email.trim().to_lowercase() {
             let _ = proxy.send_event(Msg::WrongAccount {
                 owner: email.to_string(),
                 service: service.to_string(),
                 served: served.to_string(),
             });
+        }
+        return;
+    }
+    if value["type"] == "avatar" {
+        let (Some(served), Some(src)) = (value["email"].as_str(), value["src"].as_str()) else {
+            return;
+        };
+        if !config::is_avatar_url(src) {
+            println!("[masse] ignoring non-photo avatar for {served}: {src}");
+            return;
+        }
+        // Never file a photo against a pane that is showing the wrong account: the
+        // account message above has already sent that pane to a login.
+        if service != ADD && served.trim().to_lowercase() != email.trim().to_lowercase() {
             return;
         }
         let _ = proxy.send_event(Msg::Avatar {
@@ -1664,14 +1675,36 @@ const PROBE: &str = r#"
   };
 })();
 window.addEventListener('load', () => {
+  // A real profile photo is served from googleusercontent.com. Google also puts a
+  // blue loading ring from ssl.gstatic.com inside the same account button while
+  // the photo loads, and taking the first <img> we saw meant that spinner got
+  // stored as somebody's avatar and drawn in the rail forever.
+  const isPhoto = (src) => {
+    try {
+      return new URL(src, location.href).hostname.endsWith('.googleusercontent.com');
+    } catch (e) { return false; }
+  };
+  // Reported separately, because the address is what verifies the pane is showing
+  // the right account and it must not wait on a photo that may never load.
+  let saidAccount = false, saidPhoto = false;
   const find = () => {
     for (const el of document.querySelectorAll('[aria-label*="Google Account"]')) {
       const email = (el.getAttribute('aria-label') || '').match(/[\w.+-]+@[\w-]+\.[\w.]+/);
-      const img = el.querySelector('img');
-      if (email && img && /^https?:/.test(img.src)) {
-        window.ipc.postMessage(JSON.stringify({ type: 'avatar', email: email[0], src: img.src }));
-        return true;
+      if (!email) continue;
+      if (!saidAccount) {
+        saidAccount = true;
+        window.ipc.postMessage(JSON.stringify({ type: 'account', email: email[0] }));
       }
+      if (!saidPhoto) {
+        for (const img of el.querySelectorAll('img')) {
+          if (isPhoto(img.src)) {
+            saidPhoto = true;
+            window.ipc.postMessage(JSON.stringify({ type: 'avatar', email: email[0], src: img.src }));
+            break;
+          }
+        }
+      }
+      if (saidAccount && saidPhoto) return true;
     }
     return false;
   };

@@ -200,8 +200,11 @@ pub fn rail_html(state: &str) -> String {
         ava.style.background = a.color;
         if (a.avatar) {{
           const img = new Image();
-          img.src = a.avatar;
           img.referrerPolicy = 'no-referrer';
+          // A Google photo URL can expire. Without this the image simply fails and
+          // leaves a bare circle of the account colour with nothing in it.
+          img.onerror = () => {{ img.remove(); ava.textContent = a.initials; }};
+          img.src = a.avatar;
           ava.appendChild(img);
         }} else ava.textContent = a.initials;
         // Switching account keeps whichever app you are already looking at.
@@ -522,8 +525,11 @@ pub fn settings_html(state: &str) -> String {
         ava.style.background = a.color;
         if (a.avatar) {{
           const img = new Image();
-          img.src = a.avatar;
           img.referrerPolicy = 'no-referrer';
+          // A Google photo URL can expire. Without this the image simply fails and
+          // leaves a bare circle of the account colour with nothing in it.
+          img.onerror = () => {{ img.remove(); ava.textContent = a.initials; }};
+          img.src = a.avatar;
           ava.appendChild(img);
         }} else ava.textContent = a.initials;
         row.appendChild(ava);
