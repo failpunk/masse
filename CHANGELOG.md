@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.3
+- **An account that is missing from Google's session can now actually be added.**
+  1.0.1 correctly noticed that a pane was showing the wrong account and sent it to
+  `ServiceLogin`, which was the wrong door: ServiceLogin means "sign in", and
+  Google treats it as already satisfied when ANY account is signed in, so it
+  forwarded straight back to the wrong one. The recovery now uses `AddSession`,
+  which means "sign in to an additional account". That is the real situation:
+  `?authuser=` can only pick an account the session already has, and no URL can
+  conjure one that was never signed in.
+- **Clicking an account retries.** A failed recovery used to stick for the rest of
+  the session, so the pane silently kept showing the wrong account until a
+  restart. Clicking it in the rail now clears that and tries again.
+
 ## 1.0.2
 - **The blue ring in the rail was Google's loading spinner.** An account's photo is
   read off the page, and the code took the first image inside the account button.

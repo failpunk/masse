@@ -256,6 +256,25 @@ pub fn service_url(email: &str, service: &str) -> String {
 /// pages that contain no login form, so a pane that lands there is a dead end.
 /// This is the way back in: Google's own login, told where to go afterwards and
 /// which address to preselect.
+/// The way back in when an account is missing from Google's session.
+///
+/// NOT ServiceLogin. ServiceLogin means "sign in", so when another account is
+/// already signed in Google treats the request as satisfied and forwards straight
+/// to the continue URL as that other account, which is how a pane could keep
+/// showing the wrong inbox no matter how many times it was sent to "log in".
+/// AddSession means "sign in to an ADDITIONAL account", which is the actual
+/// situation: `?authuser=` can only select an account the session already has.
+pub fn add_session_url(email: &str, service: &str) -> String {
+    if service == ADD {
+        return service_url(email, service);
+    }
+    format!(
+        "https://accounts.google.com/AddSession?continue={}&Email={}",
+        encode(&service_url(email, service)),
+        encode(email)
+    )
+}
+
 /// Whether a URL is plausibly somebody's profile photo.
 ///
 /// Google serves real profile photos from googleusercontent.com. It also renders a
@@ -911,6 +930,22 @@ mod tests {
         // here fights the login it is in the middle of.
         let signin = "https://accounts.google.com/ServiceLogin?service=mail";
         assert_eq!(with_account(signin, "b@work.com"), signin);
+    }
+
+    #[test]
+    fn recovering_an_account_uses_addsession_not_servicelogin() {
+        // ServiceLogin is satisfied by ANY signed-in account, so it forwarded
+        // straight back to the wrong one. AddSession is the only endpoint that
+        // asks for an additional account.
+        let url = add_session_url("b@work.com", "mail");
+        assert!(url.starts_with("https://accounts.google.com/AddSession?"), "{url}");
+        assert!(!url.contains("ServiceLogin"), "{url}");
+        assert!(url.contains("Email=b%40work.com"), "{url}");
+        // And it comes back to the app that pane is for, not just to mail.
+        assert!(
+            add_session_url("b@work.com", "calendar").contains("calendar.google.com"),
+            "calendar pane must return to calendar"
+        );
     }
 
     #[test]

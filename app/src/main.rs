@@ -25,7 +25,7 @@ use wry::{
 };
 
 use config::{
-    expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
+    add_session_url, expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
     is_download, unwrap_redirect, with_account, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
@@ -381,6 +381,13 @@ fn main() -> wry::Result<()> {
             }
 
             Event::UserEvent(Msg::Show { email, service }) => {
+                // Clicking an account is a deliberate request for it, so forget any
+                // earlier failed rescue for that pane. Without this, one failed
+                // sign-in meant the pane silently showed the wrong account for the
+                // rest of the session with no way to try again short of a restart.
+                if let Ok(mut state) = app.try_borrow_mut() {
+                    state.rescued.remove(&key_of(&email, &service));
+                }
                 show(&app, &window, &proxy, &chrome, &email, &service);
             }
 
@@ -446,13 +453,15 @@ fn main() -> wry::Result<()> {
                 let Ok(mut state) = app.try_borrow_mut() else { return };
                 if state.rescued.insert(key.clone()) {
                     println!(
-                        "[masse] {owner} {service} was served as {served}; going to login for {owner}"
+                        "[masse] {owner} {service} was served as {served}; adding {owner} to the session"
                     );
                     if let Some(view) = state.panes.get(&key) {
-                        let _ = view.load_url(&signin_url(&owner, &service));
+                        let _ = view.load_url(&add_session_url(&owner, &service));
                     }
                 } else {
-                    println!("[masse] {owner} {service} still served as {served}; leaving it alone");
+                    // Clicking the account in the rail clears this, so the retry is
+                    // in the user's hands rather than gone for the whole session.
+                    println!("[masse] {owner} {service} still served as {served}; click it again to retry");
                 }
             }
 
