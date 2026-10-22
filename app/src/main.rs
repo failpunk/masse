@@ -25,7 +25,7 @@ use wry::{
 };
 
 use config::{
-    add_session_url, expected_host, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
+    add_session_url, expected_host, page_can_fetch, route, route_link, service_url, signin_url, Account, Config, Route, ADD,
     is_download, unwrap_redirect, with_account, MonitorSpot, NAV_STACKED, PALETTE, SERVICES,
 };
 use lru::Lru;
@@ -86,6 +86,9 @@ enum Msg {
     /// account the pane was asked for, `email` is what came back. They differ when
     /// Google has signed that account out.
     Avatar { owner: String, service: String, email: String, src: String },
+    /// The add-account flow landed on this address. Saved if new, and the view
+    /// moves to it so the add screen does not linger under another account.
+    Discovered { email: String },
     /// A pane is showing an account other than the one it is labelled with. Sent
     /// once per pane so a login that keeps failing cannot loop.
     WrongAccount { owner: String, service: String, served: String },
@@ -118,6 +121,15 @@ enum Msg {
     /// download navigation we cancelled because WebKit would have rendered it
     /// rather than saving it.
     GrabBlob(String),
+    /// A download the page cannot fetch itself (cross-origin, or too big for
+    /// IPC). WebKit fetches it in a hidden webview so the visible pane is left
+    /// alone.
+    DownloadNatively(String),
+    /// A background download finished; its hidden webview can go.
+    DownloadDone(u64),
+    /// A pane's WebKit content process died. The pane is still there, but it is
+    /// blank, and stays blank until something reloads it.
+    PaneDied(String),
 }
 
 struct App {
@@ -133,6 +145,53 @@ struct App {
     /// Panes already sent to the login page once. Without this, a login that
     /// keeps failing would bounce the pane round in circles.
     rescued: std::collections::HashSet<String>,
+    /// Hidden webviews doing a download each, keyed by a counter. A download used
+    /// to be loaded into the visible pane, which replaced what you were looking
+    /// at with an empty page while WebKit saved the file. These share the session
+    /// store, so they carry the same Google cookies, and are dropped once done.
+    downloaders: HashMap<u64, (std::time::Instant, WebView)>,
+    next_download: u64,
+}
+
+/// Where each in-flight download is being written, by URL. wry's success callback
+/// never passes the path (it always hands back None), so without remembering it
+/// here every finished download looked like a failure and was never revealed.
+fn download_paths() -> &'static std::sync::Mutex<HashMap<String, std::path::PathBuf>> {
+    static PATHS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::path::PathBuf>>> =
+        std::sync::OnceLock::new();
+    PATHS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Where a download lands: ~/Downloads, under the name the server gave it.
+fn download_target(url: &str, path: &mut std::path::PathBuf) -> bool {
+    if let Some(home) = std::env::var_os("HOME") {
+        let name = path
+            .file_name()
+            .map(|n| n.to_owned())
+            .unwrap_or_else(|| std::ffi::OsString::from("download"));
+        let mut target = std::path::PathBuf::from(home);
+        target.push("Downloads");
+        target.push(name);
+        *path = target;
+    }
+    println!("[masse] download started: {} -> {}", &url[..url.len().min(100)], path.display());
+    if let Ok(mut paths) = download_paths().lock() {
+        paths.insert(url.to_string(), path.clone());
+    }
+    true
+}
+
+fn download_finished(url: &str, path: Option<std::path::PathBuf>, success: bool) {
+    let remembered = download_paths().lock().ok().and_then(|mut p| p.remove(url));
+    let path = path.or(remembered);
+    match (success, path) {
+        (true, Some(path)) => {
+            println!("[masse] saved {}", path.display());
+            let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+        }
+        (true, None) => println!("[masse] download finished: {}", &url[..url.len().min(100)]),
+        (false, _) => eprintln!("[masse] download failed: {}", &url[..url.len().min(100)]),
+    }
 }
 
 fn key_of(email: &str, service: &str) -> String {
@@ -343,6 +402,8 @@ fn main() -> wry::Result<()> {
         settings: None,
         dirty: false,
         rescued: std::collections::HashSet::new(),
+        downloaders: HashMap::new(),
+        next_download: 0,
     }));
 
     event_loop.run(move |event, _target, control_flow| {
@@ -441,6 +502,46 @@ fn main() -> wry::Result<()> {
                         }
                     }
                 }
+            }
+
+            Event::UserEvent(Msg::Discovered { email }) => {
+                let wanted = email.trim().to_lowercase();
+                {
+                    let Ok(mut state) = app.try_borrow_mut() else { return };
+                    let add_key = state
+                        .panes
+                        .keys()
+                        .find(|k| k.ends_with(&format!("\u{1}{ADD}")))
+                        .cloned();
+                    if state.config.find(&wanted).is_some() {
+                        // Google finished the sign-in but redirected to an account we
+                        // already have, usually the first one. Offer the chooser once
+                        // so the new account can be picked; it reports itself from
+                        // there like any other page.
+                        if let Some(key) = &add_key {
+                            if state.rescued.insert(format!("{key}\u{1}chooser")) {
+                                println!("[masse] add flow landed on known {wanted}; showing the account chooser");
+                                if let Some(view) = state.panes.get(key) {
+                                    let _ = view.load_url(
+                                        "https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fmail.google.com%2Fmail%2F",
+                                    );
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    let index = state.config.accounts.len();
+                    state.config.accounts.push(Account::discovered(&wanted, index));
+                    state.config.save();
+                    println!("[masse] added account {wanted}");
+                    // The add screen has done its job. Leaving it alive kept it as
+                    // the "current app", so clicking an avatar reopened it.
+                    if let Some(key) = &add_key {
+                        state.panes.remove(key);
+                        state.rescued.remove(&format!("{key}\u{1}chooser"));
+                    }
+                }
+                show(&app, &window, &proxy, &chrome, &wanted, "mail");
             }
 
             Event::UserEvent(Msg::WrongAccount { owner, service, served }) => {
@@ -708,6 +809,62 @@ fn main() -> wry::Result<()> {
                         let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
                     }
                     Err(err) => eprintln!("[masse] blob save failed: {err}"),
+                }
+            }
+
+            Event::UserEvent(Msg::PaneDied(key)) => {
+                // A content process dies from running out of memory or crashing,
+                // and the pane it was drawing simply goes white. Nothing brings it
+                // back on its own, so the window looks broken until the whole app
+                // is restarted. Reload it where it should have been.
+                let (email, service) = match key.split_once('\u{1}') {
+                    Some((e, s)) => (e.to_string(), s.to_string()),
+                    None => return,
+                };
+                eprintln!("[masse] content process died for {email} {service}; reloading");
+                let Ok(state) = app.try_borrow() else { return };
+                if let Some(view) = state.panes.get(&key) {
+                    let _ = view.load_url(&service_url(&email, &service));
+                }
+            }
+
+            Event::UserEvent(Msg::DownloadNatively(url)) => {
+                // WebKit does the fetch so its own download machinery saves the
+                // file, but in a hidden webview of its own. Loading it into the
+                // visible pane replaced the page you were on with a blank one.
+                let Ok(mut state) = app.try_borrow_mut() else { return };
+                // Anything still here after ten minutes never became a download
+                // (WebKit chose to display it instead), so stop holding it.
+                state
+                    .downloaders
+                    .retain(|_, (born, _)| born.elapsed() < std::time::Duration::from_secs(600));
+                let id = state.next_download;
+                state.next_download += 1;
+                let done = proxy.clone();
+                let built = WebViewBuilder::new()
+                    .with_bounds(rect(0.0, 0.0, 1.0, 1.0))
+                    .with_visible(false)
+                    .with_data_store_identifier(SESSION_STORE)
+                    .with_user_agent(UA)
+                    .with_url(&url)
+                    .with_download_started_handler(|url, path| download_target(&url, path))
+                    .with_download_completed_handler(move |url, path, success| {
+                        download_finished(&url, path, success);
+                        let _ = done.send_event(Msg::DownloadDone(id));
+                    })
+                    .build_as_child(&window);
+                match built {
+                    Ok(view) => {
+                        println!("[masse] downloading in the background: {}", &url[..url.len().min(100)]);
+                        state.downloaders.insert(id, (std::time::Instant::now(), view));
+                    }
+                    Err(err) => eprintln!("[masse] could not start download: {err}"),
+                }
+            }
+
+            Event::UserEvent(Msg::DownloadDone(id)) => {
+                if let Ok(mut state) = app.try_borrow_mut() {
+                    state.downloaders.remove(&id);
                 }
             }
 
@@ -1014,6 +1171,13 @@ fn show(
             .with_url(service_url(email, service))
             .with_initialization_script(PROBE)
             .with_ipc_handler(move |req| handle_pane(&probe_proxy, &owner, &app_name, req.body()))
+            .with_on_web_content_process_terminate_handler({
+                let proxy = proxy.clone();
+                let key = key.clone();
+                move || {
+                    let _ = proxy.send_event(Msg::PaneDied(key.clone()));
+                }
+            })
             // Target=_blank links: never adopt them into this pane.
             // Gmail marks outbound links target=_blank, so this is the main path.
             .with_new_window_req_handler({
@@ -1027,7 +1191,13 @@ fn show(
                     // download navigation: fetched in the page, saved natively.
                     if is_download(&url) {
                         println!("[masse] download link: {}", &url[..url.len().min(120)]);
-                        let _ = proxy.send_event(Msg::GrabBlob(url));
+                        if page_can_fetch(&service, &url) {
+                            let _ = proxy.send_event(Msg::GrabBlob(url));
+                        } else {
+                            // Cross-origin: the page cannot fetch it, so let WebKit
+                            // make the request and use its own download machinery.
+                            let _ = proxy.send_event(Msg::DownloadNatively(url));
+                        }
                     } else if route_link(&service, &url) != Route::Drop {
                         let _ = proxy.send_event(Msg::External(outbound(&url, &account)));
                     } else {
@@ -1050,8 +1220,19 @@ fn show(
                         // renders into nowhere and the click appears to do nothing.
                         // Cancel it and have the page fetch the bytes instead.
                         if is_download(&url) {
-                            println!("[masse] download nav caught: {}", &url[..url.len().min(140)]);
-                            let _ = proxy.send_event(Msg::GrabBlob(url));
+                            // Only take it over if the page could actually fetch it.
+                            // Cancelling a cross-origin download and then failing
+                            // the fetch on CORS loses the download entirely, which
+                            // is what made Drive's Download button do nothing.
+                            if page_can_fetch(&service, &url) {
+                                println!("[masse] download nav caught: {}", &url[..url.len().min(140)]);
+                                let _ = proxy.send_event(Msg::GrabBlob(url));
+                                return false;
+                            }
+                            // Cross-origin: hand it to a hidden webview. Letting it
+                            // navigate here saved the file but left this pane on a
+                            // blank page.
+                            let _ = proxy.send_event(Msg::DownloadNatively(url));
                             return false;
                         }
                         true
@@ -1068,32 +1249,8 @@ fn show(
                     }
                 }
             })
-            .with_download_started_handler(|url, path| {
-                // Straight to ~/Downloads under the name the server gave it.
-                if let Some(home) = std::env::var_os("HOME") {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_owned())
-                        .unwrap_or_else(|| std::ffi::OsString::from("download"));
-                    let mut target = std::path::PathBuf::from(home);
-                    target.push("Downloads");
-                    target.push(name);
-                    *path = target;
-                }
-                println!(
-                    "[masse] download started: {} -> {}",
-                    &url[..url.len().min(100)],
-                    path.display()
-                );
-                true
-            })
-            .with_download_completed_handler(|_url, path, success| match (success, path) {
-                (true, Some(path)) => {
-                    println!("[masse] saved {}", path.display());
-                    let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
-                }
-                _ => eprintln!("[masse] download failed"),
-            })
+            .with_download_started_handler(|url, path| download_target(&url, path))
+            .with_download_completed_handler(|url, path, success| download_finished(&url, path, success))
             .build_as_child(window);
         match built {
             Ok(view) => {
@@ -1191,9 +1348,13 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
     // verifying the pane never depends on a profile photo existing.
     if value["type"] == "account" {
         let Some(served) = value["email"].as_str() else { return };
-        // The add flow is exempt: it exists precisely to land on an account we do
-        // not know yet.
-        if service != ADD && served.trim().to_lowercase() != email.trim().to_lowercase() {
+        // In the add flow, the address IS the discovery. It used to wait for the
+        // profile photo, so an account with no photo was seen and then never saved.
+        if service == ADD {
+            let _ = proxy.send_event(Msg::Discovered { email: served.to_string() });
+            return;
+        }
+        if served.trim().to_lowercase() != email.trim().to_lowercase() {
             let _ = proxy.send_event(Msg::WrongAccount {
                 owner: email.to_string(),
                 service: service.to_string(),
@@ -1224,6 +1385,11 @@ fn handle_pane(proxy: &EventLoopProxy<Msg>, email: &str, service: &str, body: &s
     }
     if value["type"] == "jslog" {
         println!("[js] {}", value["msg"].as_str().unwrap_or_default());
+        return;
+    }
+    if value["type"] == "downloadNative" {
+        let Some(url) = value["url"].as_str() else { return };
+        let _ = proxy.send_event(Msg::DownloadNatively(url.to_string()));
         return;
     }
     if value["type"] == "save" {
@@ -1622,6 +1788,9 @@ fn rail_state(config: &Config, active: &str) -> String {
         })
         .collect();
     let (email, service) = active.split_once('\u{1}').unwrap_or(("", "mail"));
+    // The add screen is not an app. Exposed as the current service, every avatar
+    // click carried it along and reopened the add screen under that account.
+    let service = if service == ADD { "mail" } else { service };
     serde_json::json!({
         "accounts": accounts,
         "services": SERVICES,
@@ -1667,11 +1836,33 @@ const PROBE: &str = r#"
     } catch (e) {}
     return 'download';
   }
+  // Anything bigger than this is not worth moving through IPC: the bytes get
+  // base64'd (a third bigger again) into a JSON string, and a large enough file
+  // takes the whole content process out with it, which shows up as the pane
+  // going blank. WebKit can fetch those itself.
+  const IPC_LIMIT = 25 * 1024 * 1024;
   // Called from the Rust side when a download navigation was cancelled.
   window.__masseGrab = (url) => {
     fetch(url, { credentials: 'include' })
-      .then((r) => r.blob().then((blob) => ({ blob, disposition: r.headers.get('content-disposition') })))
-      .then(({ blob, disposition }) => {
+      .then((r) => {
+        const size = parseInt(r.headers.get('content-length') || '0', 10);
+        if (size > IPC_LIMIT) {
+          window.ipc.postMessage(JSON.stringify({ type: 'downloadNative', url: url }));
+          return null;
+        }
+        return r.blob().then((blob) => {
+          if (blob.size > IPC_LIMIT) {
+            // No content-length on the response, so this is the first point the
+            // real size is known.
+            window.ipc.postMessage(JSON.stringify({ type: 'downloadNative', url: url }));
+            return null;
+          }
+          return { blob, disposition: r.headers.get('content-disposition') };
+        });
+      })
+      .then((got) => {
+        if (!got) return;
+        const { blob, disposition } = got;
         const reader = new FileReader();
         reader.onload = () => {
           window.ipc.postMessage(JSON.stringify({
@@ -1700,7 +1891,9 @@ window.addEventListener('load', () => {
     for (const el of document.querySelectorAll('[aria-label*="Google Account"]')) {
       const email = (el.getAttribute('aria-label') || '').match(/[\w.+-]+@[\w-]+\.[\w.]+/);
       if (!email) continue;
-      if (!saidAccount) {
+      // Google's own sign-in pages show the account you are ALREADY signed into,
+      // so mid-way through adding a new one they would report the old one.
+      if (!saidAccount && location.hostname !== 'accounts.google.com') {
         saidAccount = true;
         window.ipc.postMessage(JSON.stringify({ type: 'account', email: email[0] }));
       }

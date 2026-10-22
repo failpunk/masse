@@ -256,6 +256,19 @@ pub fn service_url(email: &str, service: &str) -> String {
 /// pages that contain no login form, so a pane that lands there is a dead end.
 /// This is the way back in: Google's own login, told where to go afterwards and
 /// which address to preselect.
+/// Whether the pane could fetch this URL itself.
+///
+/// Masse handles some downloads by cancelling the navigation and fetching the
+/// bytes inside the page, because WebKit renders a displayable file instead of
+/// saving it. That only works same-origin. A Gmail attachment lives on
+/// mail.google.com, the same origin as the pane, so the fetch is allowed. A Drive
+/// file lives on drive.usercontent.google.com while the pane is drive.google.com,
+/// and that host sends no CORS headers, so the fetch is blocked and the download
+/// is simply lost. Cross-origin downloads have to be left to WebKit.
+pub fn page_can_fetch(service: &str, url: &str) -> bool {
+    host_of(url) == Some(expected_host(service))
+}
+
 /// The way back in when an account is missing from Google's session.
 ///
 /// NOT ServiceLogin. ServiceLogin means "sign in", so when another account is
@@ -464,10 +477,16 @@ pub fn is_download(url: &str) -> bool {
         return true;
     }
     let Some(host) = host_of(url) else { return false };
-    matches!(
-        host,
-        "mail-attachment.googleusercontent.com" | "drive.usercontent.google.com"
-    ) || (host.ends_with(".googleusercontent.com") && url.contains("/download"))
+    // drive.usercontent.google.com is matched by PATH, not by host alone. Drive
+    // loads drive.usercontent.google.com/auth_warmup in a hidden frame before a
+    // download, to set cookies on that domain. Treating every URL on the host as
+    // a download pulled the warm-up out of the page, so Drive never started the
+    // real download and the button did nothing.
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    host == "mail-attachment.googleusercontent.com"
+        || (host == "drive.usercontent.google.com"
+            && (path.contains("/download") || path.contains("/uc")))
+        || (host.ends_with(".googleusercontent.com") && url.contains("/download"))
         || url.contains("view=att")
         || url.contains("export=download")
 }
@@ -930,6 +949,37 @@ mod tests {
         // here fights the login it is in the middle of.
         let signin = "https://accounts.google.com/ServiceLogin?service=mail";
         assert_eq!(with_account(signin, "b@work.com"), signin);
+    }
+
+    #[test]
+    fn drives_cookie_warm_up_is_not_a_download() {
+        // Verbatim from the log: Drive loads this in a hidden frame before every
+        // download. Pulling it out of the page stopped Drive downloading at all.
+        assert!(!is_download("https://drive.usercontent.google.com/auth_warmup"));
+        assert!(is_download(
+            "https://drive.usercontent.google.com/download?id=abc&export=download&authuser=1"
+        ));
+        assert!(is_download("https://drive.usercontent.google.com/uc?id=abc&export=download"));
+    }
+
+    #[test]
+    fn only_same_origin_downloads_are_fetched_in_the_page() {
+        // Gmail: attachment is on the same host as the pane, so the in-page fetch
+        // is allowed and is the only thing that works (WebKit would render a JPEG
+        // instead of saving it).
+        assert!(page_can_fetch(
+            "mail",
+            "https://mail.google.com/mail/u/0/?ui=2&view=att&disp=safe"
+        ));
+        // Drive: the file is on another host that sends no CORS headers, so the
+        // fetch would be blocked and the download lost. Verbatim shape of the URL
+        // behind Drive's Download button.
+        assert!(!page_can_fetch(
+            "drive",
+            "https://drive.usercontent.google.com/download?id=abc&export=download"
+        ));
+        assert!(!page_can_fetch("drive", "https://lh3.googleusercontent.com/x"));
+        assert!(page_can_fetch("drive", "https://drive.google.com/uc?export=download&id=x"));
     }
 
     #[test]

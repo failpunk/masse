@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.0.9
+- **Downloading from Drive no longer blanks the pane.** Cross-origin downloads
+  were handed to WebKit by loading them into the pane you were looking at, which
+  saved the file but replaced Drive with an empty page. They now run in a hidden
+  webview of their own that shares the same session, and is discarded once the
+  file has been saved.
+- Drive's cookie warm-up (`drive.usercontent.google.com/auth_warmup`), which it
+  loads in a hidden frame before every download, is no longer mistaken for a
+  download. Matching that whole host pulled the warm-up out of the page, so Drive
+  never started the real download.
+- **Finished downloads are revealed in Finder again, and no longer logged as
+  failures.** wry's success callback never passes the saved file's path, and
+  Masse only counted a download as successful when it had one, so every
+  download that worked, Gmail included, was reported as failed and never shown.
+  Masse now remembers the path from when the download started.
+
+## 1.0.6
+- **Adding an account works for accounts without a profile photo.** Since 1.0.2 a
+  new account was only saved once its photo had been read, so an account with no
+  photo was seen by the add flow and then dropped. The address alone now saves it.
+- **The add screen no longer hijacks an avatar.** After pressing +, the add screen
+  became the "current app", and clicking an avatar keeps the current app, so it
+  reopened the add screen under that account showing whichever account Google had
+  last landed on. Once an account is added, Masse switches to its Mail and closes
+  the add screen, and the add screen is never carried over as an app.
+- **If Google lands on an account you already have,** Masse shows Google's account
+  chooser once so the new account can be picked.
+- Google's sign-in pages no longer report an account. They show the account you
+  are already signed into, which used to be mistaken for the one being added.
+
+## 1.0.5
+- **Drive's Download button works.** Masse handles some downloads by cancelling
+  the navigation and fetching the file inside the page, because WebKit renders a
+  displayable file instead of saving it. That only works same-origin. A Gmail
+  attachment is on `mail.google.com`, the same origin as the pane, so the fetch is
+  allowed. A Drive file is on `drive.usercontent.google.com` while the pane is
+  `drive.google.com`, and that host sends no CORS headers, so the fetch was
+  blocked and the download was simply lost: click Download, nothing happens.
+  Masse now only takes a download over when the page could actually fetch it, and
+  leaves every cross-origin one to WebKit.
+
+## 1.0.4
+- **A pane that goes blank now comes back.** When WebKit's content process dies,
+  the pane it was drawing turns white and stays white: nothing reloads it, so the
+  app looks broken until it is restarted. Masse now notices the process dying and
+  reloads that pane where it should have been.
+- **A large download no longer takes the pane down with it.** A cancelled download
+  navigation is fetched inside the page and handed to the native side as base64,
+  which is a third larger again, inside a JSON string. That is fine for a mail
+  attachment and fatal for a big Drive file: the content process runs out of
+  memory and the pane goes blank, which is exactly what a blank Drive looked like.
+  Anything over 25 MB is now left to WebKit's own download machinery instead.
+
 ## 1.0.3
 - **An account that is missing from Google's session can now actually be added.**
   1.0.1 correctly noticed that a pane was showing the wrong account and sent it to
