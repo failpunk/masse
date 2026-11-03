@@ -1,11 +1,37 @@
 # Railway injects PORT; Caddy reads it directly.
 :{$PORT:8080} {
-	root * /srv
-	file_server
 	encode gzip
-	header /* Cache-Control "public, max-age=300"
-	# Short cache on the icons: browsers hold favicons far longer than they should,
-	# and a stale one looks like a broken deploy.
-	header /favicon.ico Cache-Control "public, max-age=60"
-	header /icon* Cache-Control "public, max-age=60"
+
+	# PostHog through our own domain, so ad blockers that block *.posthog.com still
+	# let the page count. The SDK script and remote config come from the assets host,
+	# events go to the ingest host. Proxied responses keep PostHog's own cache headers.
+	handle_path /ingest/static/* {
+		rewrite * /static{path}
+		reverse_proxy https://us-assets.i.posthog.com {
+			header_up Host us-assets.i.posthog.com
+		}
+	}
+	handle_path /ingest/array/* {
+		rewrite * /array{path}
+		reverse_proxy https://us-assets.i.posthog.com {
+			header_up Host us-assets.i.posthog.com
+		}
+	}
+	handle_path /ingest/* {
+		reverse_proxy https://us.i.posthog.com {
+			header_up Host us.i.posthog.com
+		}
+	}
+
+	handle {
+		root * /srv
+		file_server
+		# Short cache on the icons: browsers hold favicons far longer than they should,
+		# and a stale one looks like a broken deploy. The matchers are exclusive because
+		# overlapping header rules let the 300 win.
+		@icons path /favicon.ico /icon*
+		@pages not path /favicon.ico /icon*
+		header @icons Cache-Control "public, max-age=60"
+		header @pages Cache-Control "public, max-age=300"
+	}
 }
